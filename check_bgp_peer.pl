@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# check_bgp_peer_table.pl
+# check_bgp_peer.pl
 # Perl 5.12+
 #
 # DATE   : October 20 2024
@@ -13,6 +13,7 @@
 
 use strict;
 use warnings;
+use File::Basename;
 use Net::SNMP;
 use Getopt::Long;
 
@@ -40,8 +41,10 @@ my %OID = (
     peer_out      => '1.3.6.1.2.1.15.3.1.13',
     peer_uptime   => '1.3.6.1.2.1.15.3.1.16',
 
-    # Cisco-only (CISCO-BGP4-MIB)
+    # Cisco-only (CISCO-BGP4-MIB) - IOS/IOS-XE
     pfx_accepted  => '1.3.6.1.4.1.9.9.187.1.2.8.1.1',
+    # Cisco-only (CISCO-BGP4-MIB v2) - IOS-XR/NX-OS
+    pfx_accepted2 => '1.3.6.1.4.1.9.9.187.1.2.4.1.1',
 
     # Platform detection
     sys_object_id => '1.3.6.1.2.1.1.2.0',
@@ -81,8 +84,8 @@ GetOptions(
     'help'        => \$opt{help},
 ) or usage();
 
-usage() if $opt{help};
-usage() unless $opt{hostname};
+usage(0) if $opt{help};
+usage()  unless $opt{hostname};
 
 $opt{port}    ||= 161;
 $opt{version} ||= '2c';
@@ -132,9 +135,12 @@ my $peer_table = $session->get_entries(
 
 my $pfx_table = {};
 if ($is_cisco) {
-    $pfx_table = $session->get_table(
-        -baseoid => $OID{pfx_accepted}
-    ) || {};
+    # Try legacy IOS/IOS-XE OID first; fall back to IOS-XR/NX-OS OID
+    my $t = $session->get_table( -baseoid => $OID{pfx_accepted} );
+    if (!$t || !%$t) {
+        $t = $session->get_table( -baseoid => $OID{pfx_accepted2} );
+    }
+    $pfx_table = $t || {};
 }
 
 # ==========================
@@ -280,21 +286,41 @@ sub snmp_fail {
 }
 
 sub usage {
-    print <<"USAGE";
-Usage:
+    my $rc   = shift // UNKNOWN;
+    my $name = basename($0);
+    print <<"END_USAGE";
+Usage: $name [OPTIONS]
+
  SNMPv2c:
-   $0 --hostname <host> --community <string> [--port 161] [--version 2c]
+   $name --hostname <host> --community <string>
+         [--port 161] [--version 1|2c]
 
  SNMPv3:
-   $0 --hostname <host> --version 3 --username <user>
-      [--port 161]
-      [--authproto MD5|SHA --authpass <pass>]
-      [--privproto DES|AES --privpass <pass>]
+   $name --hostname <host> --version 3 --username <user>
+         [--port 161]
+         [--authproto MD5|SHA|SHA256] [--authpass <pass>]
+         [--privproto DES|AES]        [--privpass <pass>]
 
- Options:
-   --timeout <sec>   SNMP timeout in seconds (default: 10)
-   --retries <n>     SNMP retries (default: 2)
-   --help            Show this help
-USAGE
-    exit UNKNOWN;
+ Required:
+   --hostname  <host>  Target hostname or IP address
+
+ Connection:
+   --port      <port>  SNMP port                       (default: 161)
+   --version   <ver>   SNMP version: 1, 2c, or 3       (default: 2c)
+   --timeout   <sec>   SNMP timeout in seconds         (default: 10)
+   --retries   <n>     SNMP retries                    (default: 2)
+
+ SNMPv1/2c:
+   --community <str>   Community string
+
+ SNMPv3:
+   --username  <user>  Username (required for v3)
+   --authproto <alg>   Auth protocol: MD5, SHA, SHA256 (default: SHA)
+   --authpass  <pass>  Auth passphrase
+   --privproto <alg>   Priv protocol: DES, AES         (default: AES)
+   --privpass  <pass>  Priv passphrase
+
+   --help              Show this help
+END_USAGE
+    exit $rc;
 }
