@@ -142,6 +142,19 @@ function Get-PuppetServer {
 }
 
 # ---------------------------------------------------------------------------
+# Get the installed Puppet agent version
+# ---------------------------------------------------------------------------
+function Get-PuppetVersion {
+    if (Get-Command puppet -ErrorAction SilentlyContinue) {
+        try {
+            $ver = & puppet --version 2>$null
+            if ($ver) { return $ver.Trim() }
+        } catch { }
+    }
+    return "unknown"
+}
+
+# ---------------------------------------------------------------------------
 # Parse a PEM file — returns PSCustomObject{Subject, NotAfter} or $null
 # ---------------------------------------------------------------------------
 function Read-PemCert {
@@ -183,8 +196,9 @@ function Read-PemCert {
 # Main
 # ---------------------------------------------------------------------------
 
-$sslDir       = Resolve-SslDir -Override $PuppetSslDir
-$puppetServer = Get-PuppetServer
+$sslDir         = Resolve-SslDir -Override $PuppetSslDir
+$puppetServer   = Get-PuppetServer
+$puppetVersion  = Get-PuppetVersion
 
 if (-not $sslDir) {
     Exit-Plugin -Status UNKNOWN -Summary "Puppet SSL directory not found. Use -PuppetSslDir to specify it."
@@ -256,7 +270,7 @@ $perfData   = $perfParts -join " "
 $totalIssues = $expired.Count + $critical.Count + $warning.Count
 $details     = @($expired) + @($critical) + @($warning)
 
-$serverTag = "puppet-server=${puppetServer}"
+$serverTag = "puppet-server=${puppetServer} puppet-version=${puppetVersion}"
 
 if ($expired.Count -gt 0 -or $critical.Count -gt 0) {
     $summary = "[$serverTag] $($expired.Count) expired, $($critical.Count) critical, $($warning.Count) warning, $okCount OK"
