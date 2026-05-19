@@ -3,7 +3,7 @@
 # check_bgp_peer.pl
 # Perl 5.12+
 #
-# DATE   : October 20 2024
+# DATE   : May 19, 2026
 # AUTHOR : JP Buenaventura / Copilot
 #
 # Nagios/Icinga compatible BGP peer checker
