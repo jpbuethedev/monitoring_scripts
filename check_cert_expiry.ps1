@@ -2,14 +2,13 @@
 #
 # Option 1 (recommended — uses -Command for reliable exit code):
 # check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& 'C:\Program Files\NSClient++\scripts\check_cert_expiry.ps1' -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
-#
-# Option 2 (call powershell directly with -File):
-# check_cert_expiry = powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\Program Files\NSClient++\scripts\check_cert_expiry.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%
-#
+
 # WARNING: Do NOT use 'cmd /c ... & exit %ERRORLEVEL%' — %ERRORLEVEL% is expanded before
 # PowerShell runs, so the exit code is always 0.
 
 # Script Location: C:\Program Files\NSClient++\scripts\check_cert_expiry.ps1
+
+
 
 <#
 .SYNOPSIS
@@ -258,7 +257,10 @@ finally {
     }
 }
 
-# ✅ Exit at script top-level (outside try/catch) — guarantees exit code propagation
-$host.SetShouldExit($exitCode)
-[System.Environment]::ExitCode = $exitCode
-exit $exitCode
+# Exit code propagation — only force-close host in non-interactive contexts (e.g. NSClient++)
+# Running interactively (direct terminal) skips SetShouldExit to avoid closing the shell.
+if (-not [Environment]::UserInteractive) {
+    $host.SetShouldExit($exitCode)
+    [System.Environment]::ExitCode = $exitCode
+    exit $exitCode
+}
