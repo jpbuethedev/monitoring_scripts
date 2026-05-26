@@ -56,7 +56,11 @@ my %OID = (
     eigrp_peer_rto     => '1.3.6.1.4.1.9.9.449.1.4.1.1.7',
 
     # Platform detection
+    sys_descr     => '1.3.6.1.2.1.1.1.0',
     sys_object_id => '1.3.6.1.2.1.1.2.0',
+
+    # Hardware model (ENTITY-MIB) — index 1 = chassis
+    ent_model     => '1.3.6.1.2.1.47.1.1.1.1.13.1',
 );
 
 my %BGP_STATE = (
@@ -122,7 +126,7 @@ unless ($session) {
 
 my $is_cisco = 0;
 my $sysobj = $session->get_request(
-    -varbindlist => [ $OID{sys_object_id} ]
+    -varbindlist => [ $OID{sys_object_id}, $OID{sys_descr} ]
 );
 
 unless ($sysobj) {
@@ -136,6 +140,35 @@ unless ($sysobj) {
 if (($sysobj->{ $OID{sys_object_id} } // '') =~ /^1\.3\.6\.1\.4\.1\.9\b/) {
     $is_cisco = 1;
 }
+
+# Extract router model — prefer ENTITY-MIB entPhysicalModelName (hardware)
+my $model = 'unknown';
+{
+    my $ent = $session->get_request(
+        -varbindlist => [ $OID{ent_model} ]
+    );
+    if ($ent) {
+        my $val = $ent->{ $OID{ent_model} } // '';
+        # Ignore noSuchObject / noSuchInstance responses
+        $model = $val if $val =~ /\S/ && $val !~ /noSuch/i;
+    }
+    # Fallback: parse image name from sysDescr
+    if ($model eq 'unknown') {
+        my $descr = $sysobj->{ $OID{sys_descr} } // '';
+        if ($descr =~ /\((\S+)\)/) {
+            $model = $1;
+        }
+    }
+}
+
+# Known router models — add new entries as they are confirmed
+my %known_models = map { $_ => 1 } (
+    'C881-K9',           'CISCO881-SEC-K9',  'CISCO2801',
+    'CISCO2901/K9',      'CISCO1921/K9',     'CISCO887-SEC-K9',
+    'CISCO886VA-SEC-K9', 'CISCO881-K9',      'CISCO876-K9',
+    'CISCO871-K9',       'C886VA-K9',        'C881G+7-K9',
+    'C881G-4G-GA-K9',
+);
 
 # ==========================
 # FETCH DATA & DETECT PROTOCOL
@@ -335,19 +368,21 @@ $session->close();
 # NAGIOS OUTPUT
 # ==========================
 
+my $model_tag = ($model ne 'unknown') ? " [$model]" : '';
+
 if ($critical) {
-    print "CRITICAL: " . join(", ", @crit_msgs);
+    print "CRITICAL: " . join(", ", @crit_msgs) . $model_tag;
     print " | peers_total=$peers peers_established=$established peers_down=" . scalar(@crit_msgs) . "\n";
     exit CRITICAL;
 }
 
 if ($warning) {
-    print "WARNING: " . join(", ", @warn_msgs);
+    print "WARNING: " . join(", ", @warn_msgs) . $model_tag;
     print " | peers_total=$peers peers_established=$established peers_warned=" . scalar(@warn_msgs) . "\n";
     exit WARNING;
 }
 
-print "OK: $established/$peers $protocol peers established";
+print "OK: $established/$peers $protocol peers established${model_tag}";
 print " | peers_total=$peers peers_established=$established peers_down=0\n";
 print join("\n", @details), "\n";
 
