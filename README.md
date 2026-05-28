@@ -1,6 +1,6 @@
-# Ubuntu Scripts & Tools
+# Monitoring Scripts & Tools
 
-A collection of shell scripts, Perl plugins, and PowerShell monitoring scripts used for WPP infrastructure management and Nagios/Icinga monitoring.
+A collection of Perl plugins, and PowerShell monitoring scripts used for WPP infrastructure management and Nagios/Naemon/Icinga monitoring.
 
 ---
 
@@ -81,7 +81,7 @@ check_puppet_certs = powershell -ExecutionPolicy Bypass -NonInteractive -File "C
 
 ### `get_patch_level.ps1`
 
-PowerShell plugin that reports the Windows version, build number, and patch level (UBR). Compatible with Windows 7 through Windows 11 and modern Windows Server. Outputs Nagios-format performance data.
+PowerShell plugin that reports the Windows version, build number, and patch level (UBR). Compatible with Windows 7 through Windows 11 and modern Windows Server (10/11/Server 2016+). Outputs Nagios-format performance data.
 
 **Output example:**
 ```
