@@ -382,7 +382,8 @@ if ($warning) {
     exit WARNING;
 }
 
-print "OK: $established/$peers $protocol peers established${model_tag}";
+my $proto_msg = ($protocol eq 'EIGRP') ? "BGP not active. EIGRP" : $protocol;
+print "OK: $established/$peers $proto_msg peers established${model_tag}";
 print " | peers_total=$peers peers_established=$established peers_down=0\n";
 print join("\n", @details), "\n";
 
