@@ -1,4 +1,4 @@
-# Ubuntu Scripts & Tools
+# Monitoring Scripts & Tools
 
 A collection of shell scripts, Perl plugins, and PowerShell monitoring scripts used for WPP infrastructure management and Nagios/Icinga monitoring.
 
