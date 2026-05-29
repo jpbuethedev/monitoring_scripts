@@ -49,7 +49,8 @@ PowerShell plugin that checks certificate expiry and revocation status in the Wi
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
-check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& 'C:\Program Files\NSClient++\scripts\check_cert_expiry.ps1' -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& "scripts\check_cert_expiry.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+
 ```
 
 ---
@@ -96,39 +97,10 @@ OK: Windows Server 2019 Standard 1809 - Version: 10.0 - Build: 17763 - Patch Lev
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
-check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_patch_level.ps1"
+check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "C:\Program Files\NSClient++\scripts\get_patch_level.ps1"
 ```
 
 **Requirements:** PowerShell 3.0+
-
----
-
-### `check_cisco_wlc_ha.pl`
-
-Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via SNMP. Detects local unit role (active/standbyHot) and validates peer state, duplex mode, and HA reachability using CISCO-RF-MIB and CISCO-LWAPP-HA-MIB.
-
-| Feature | Detail |
-|---|---|
-| **Language** | Perl 5.12+ |
-| **MIBs** | CISCO-RF-MIB, CISCO-LWAPP-HA-MIB |
-| **SNMP** | v2c, v3 (authPriv) |
-| **Modes** | `--strict`, `--hard-strict` for tighter alerting |
-
-**Usage:**
-```bash
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community 'TurbineNet' --timeout 10
-```
-
-| Parameter | Default | Description |
-|---|---|---|
-| `--host` | required | Target WLC IP/hostname |
-| `--version` | 3 | SNMP version (2c or 3) |
-| `--strict` | off | Escalate peer-state mismatches to CRITICAL |
-| `--hard-strict` | off | Escalate any anomaly to CRITICAL |
-| `--timeout` | 5 | SNMP timeout in seconds |
-
-**Requirements:** `Net::SNMP`, `Getopt::Long`
 
 ---
 
