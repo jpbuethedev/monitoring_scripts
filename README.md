@@ -93,28 +93,39 @@ check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractiv
 
 ### `check_cisco_wlc_ha.pl`
 
-Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via SNMP. Detects local unit role (active/standbyHot) using CISCO-RF-MIB, checks HA peer reachability via CISCO-LWAPP-HA-MIB, and validates RF duplex and peer state. Supports `--strict` and `--hard-strict` modes for tighter alerting.
+Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via SNMP. It first queries CISCO-RF-MIB to determine the local unit's role (`active`, `standbyHot`, or transitional states like `initialization`/`negotiation`), RF duplex mode (peer detected or not), peer unit state, and last switchover reason. When the local unit is **active**, it additionally queries CISCO-LWAPP-HA-MIB (`cLHaPeerHotStandbyEvent`) to verify HA peer reachability. When the local unit is **standbyHot**, it skips the LWAPP-HA check (only meaningful on the active) and validates that the peer is in `active` state. Transitional/abnormal local states trigger WARNING by default. Supports two escalation modes: `--strict` escalates peer-state mismatches and transitional states to CRITICAL, while `--hard-strict` (superset) escalates any anomaly including LWAPP-HA read failures to CRITICAL with no UNKNOWN/WARNING fallbacks. Outputs Nagios-format status with performance data for trending (`peer_up`, `duplex`, `unit_state`, `peer_state`, `last_swact_reason`).
 
 | Feature | Detail |
 |---|---|
 | **Language** | Perl 5.12+ |
-| **MIBs** | CISCO-RF-MIB, CISCO-LWAPP-HA-MIB |
+| **MIBs** | CISCO-RF-MIB (redundancy framework), CISCO-LWAPP-HA-MIB (HA peer health) |
 | **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
-| **Platform** | Cisco 9800 WLC |
+| **Platform** | Cisco 9800 WLC (SSO HA pair) |
+| **Output** | Nagios format with perfdata (`peer_up`, `duplex`, `unit_state`, `peer_state`, `last_swact_reason`) |
 
 | Parameter | Default | Description |
 |---|---|---|
 | `--host` | required | Target WLC IP or hostname |
 | `--version` | 3 | SNMP version (2c or 3) |
+| `--secname` | — | SNMPv3 username |
+| `--seclevel` | authPriv | SNMPv3 security level |
+| `--authproto` | SHA | Auth protocol (SHA or MD5) |
+| `--privproto` | AES | Privacy protocol (AES or DES) |
 | `--strict` | off | Escalate unexpected states to CRITICAL |
 | `--hard-strict` | off | Escalate any anomaly to CRITICAL (superset of `--strict`) |
 | `--timeout` | 5 | SNMP timeout in seconds |
+| `--port` | 161 | SNMP port |
 
 **Usage:**
 ```bash
 ./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community 'public' --timeout 10
+./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community 'TurbineNet' --timeout 10
 ./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --strict
+```
+
+**Output example:**
+```
+OK - Role=ACTIVE(active); HA Peer: reachable; RF: peer detected (duplex=true); RF PeerState: standbyHot; LastSwact: none | peer_up=1 duplex=1 unit_state=14 peer_state=9 last_swact_reason=2
 ```
 
 **Requirements:** `Net::SNMP`, `Getopt::Long`
