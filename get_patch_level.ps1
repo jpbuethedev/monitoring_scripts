@@ -2,7 +2,7 @@
 # Get Windows Patch Level / UBR
 
 #  NSClient++ (nsclient.ini)
-#  check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "C:\Program Files\NSClient++\scripts\get_patch_level.ps1"
+#  check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_patch_level.ps1"
 
 # Windows Version + Build + UBR (Nagios-style output)
 # Works on Windows 7 → Windows 11 and modern Windows Server

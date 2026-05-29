@@ -1,7 +1,8 @@
 # Put this in nsclient.ini under [/settings/external scripts/scripts]
 #
 # Option 1 (recommended — uses -Command for reliable exit code):
-# check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& 'C:\Program Files\NSClient++\scripts\check_cert_expiry.ps1' -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+# check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& 'scripts\check_cert_expiry.ps1' -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+
 
 # WARNING: Do NOT use 'cmd /c ... & exit %ERRORLEVEL%' — %ERRORLEVEL% is expanded before
 # PowerShell runs, so the exit code is always 0.
