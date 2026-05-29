@@ -55,6 +55,36 @@ check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractiv
 
 ---
 
+### `check_cisco_wlc_ha.pl`
+
+Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via SNMP. Detects local unit role (active/standbyHot) using CISCO-RF-MIB, checks HA peer reachability via CISCO-LWAPP-HA-MIB, and validates RF duplex and peer state. Supports `--strict` and `--hard-strict` modes for tighter alerting.
+
+| Feature | Detail |
+|---|---|
+| **Language** | Perl 5.12+ |
+| **MIBs** | CISCO-RF-MIB, CISCO-LWAPP-HA-MIB |
+| **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
+| **Platform** | Cisco 9800 WLC |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--host` | required | Target WLC IP or hostname |
+| `--version` | 3 | SNMP version (2c or 3) |
+| `--strict` | off | Escalate unexpected states to CRITICAL |
+| `--hard-strict` | off | Escalate any anomaly to CRITICAL (superset of `--strict`) |
+| `--timeout` | 5 | SNMP timeout in seconds |
+
+**Usage:**
+```bash
+./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
+./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community 'TurbineNet' --timeout 10
+./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --strict
+```
+
+**Requirements:** `Net::SNMP`, `Getopt::Long`
+
+---
+
 ### `check_puppet_certs.ps1`
 
 PowerShell plugin that checks Puppet SSL certificate expiry. Auto-detects the Puppet SSL directory on both Windows and Linux.
@@ -97,7 +127,7 @@ OK: Windows Server 2019 Standard 1809 - Version: 10.0 - Build: 17763 - Patch Lev
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
-check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "C:\Program Files\NSClient++\scripts\get_patch_level.ps1"
+check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_patch_level.ps1"
 ```
 
 **Requirements:** PowerShell 3.0+
