@@ -160,16 +160,23 @@ check_puppet_cert_expiry = powershell -ExecutionPolicy Bypass -NonInteractive -F
 
 ### `get_patch_level.ps1`
 
-PowerShell plugin that reports the Windows version, build number, and patch level (UBR). Compatible with Windows 7 through Windows 11 and modern Windows Server (10/11/Server 2016+). Outputs Nagios-format performance data.
+PowerShell plugin that reports the Windows version, build number, and patch level (UBR) by reading the registry key `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion`. Handles both modern Windows (10/11/Server 2016+) using `CurrentMajorVersionNumber`/`CurrentMinorVersionNumber` and legacy Windows (7/8/8.1) by falling back to the `CurrentVersion` string. Resolves the friendly version label (e.g. 22H2) from `DisplayVersion` or `ReleaseId`, and retrieves the product name from the registry or `Win32_OperatingSystem` as fallback. Outputs Nagios-format status with performance data for graphing patch level trends.
 
-**Output example:**
-```
-OK: Windows Server 2019 Standard 1809 - Version: 10.0 - Build: 17763 - Patch Level (UBR): 6532 | 'version_major'=10;;;; 'version_minor'=0;;;; 'build'=17763;;;; 'ubr'=6532;;;;
-```
+| Feature | Detail |
+|---|---|
+| **Language** | PowerShell 3.0+ |
+| **Data source** | Registry (`CurrentVersion` key) |
+| **Compatibility** | Windows 7 SP1 through Windows 11, Server 2008 R2 through Server 2025 |
+| **Output** | Nagios format with perfdata (`version_major`, `version_minor`, `build`, `ubr`) |
 
 **Usage:**
 ```powershell
 .\get_patch_level.ps1
+```
+
+**Output example:**
+```
+OK: Windows Server 2019 Standard 1809 - Version: 10.0 - Build: 17763 - Patch Level (UBR): 6532 | 'version_major'=10;;;; 'version_minor'=0;;;; 'build'=17763;;;; 'ubr'=6532;;;;
 ```
 
 **NSClient++ configuration:**
@@ -177,8 +184,6 @@ OK: Windows Server 2019 Standard 1809 - Version: 10.0 - Build: 17763 - Patch Lev
 [/settings/external scripts/scripts]
 check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_patch_level.ps1"
 ```
-
-**Requirements:** PowerShell 3.0+
 
 ---
 
