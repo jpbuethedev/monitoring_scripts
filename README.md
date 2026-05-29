@@ -49,7 +49,8 @@ PowerShell plugin that checks certificate expiry and revocation status in the Wi
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
-check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& 'C:\Program Files\NSClient++\scripts\check_cert_expiry.ps1' -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& "scripts\check_cert_expiry.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+
 ```
 
 ---
@@ -74,7 +75,7 @@ PowerShell plugin that checks Puppet SSL certificate expiry. Auto-detects the Pu
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
-check_puppet_certs = powershell -ExecutionPolicy Bypass -NonInteractive -File "C:\Program Files\NSClient++\scripts\check_puppet_certs.ps1" -WarningDays 30 -CriticalDays 7
+check_puppet_cert_expiry = powershell -ExecutionPolicy Bypass -NonInteractive -File "scripts\check_puppet_certs.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%
 ```
 
 ---
