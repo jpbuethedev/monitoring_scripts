@@ -10,19 +10,38 @@ Nagios/Icinga-compatible plugins designed for use with NSClient++ or NRPE.
 
 ### `check_bgp_peer.pl`
 
-Perl plugin that checks BGP and EIGRP peer status via SNMP. Supports SNMPv2c and SNMPv3, auto-detects routing protocol (BGP or EIGRP), and identifies Cisco platforms for prefix checks.
+Perl plugin that monitors BGP and EIGRP routing peer status via SNMP. It auto-detects the active routing protocol by querying BGP4-MIB first and falling back to CISCO-EIGRP-MIB. On Cisco devices it also detects the platform (IOS, IOS-XE, IOS-XR, NX-OS) and hardware model via ENTITY-MIB, and checks accepted prefix counts using CISCO-BGP4-MIB. For EIGRP, it handles multiple IOS index formats (with/without VPN ID, IPv4/IPv6) and resolves peer interface names via ifDescr. Outputs Nagios-format status with per-peer detail lines and performance data (`peers_total`, `peers_established`, `peers_down`).
 
 | Feature | Detail |
 |---|---|
 | **Language** | Perl 5.12+ |
 | **Protocols** | BGP (BGP4-MIB), EIGRP (CISCO-EIGRP-MIB) |
-| **SNMP** | v1, v2c, v3 (authPriv) |
-| **Platform detection** | Cisco IOS, IOS-XE, IOS-XR, NX-OS |
+| **SNMP** | v1, v2c, v3 (authNoPriv, authPriv) |
+| **Platform detection** | Cisco IOS, IOS-XE, IOS-XR, NX-OS via sysObjectID + ENTITY-MIB |
+| **Cisco BGP prefix check** | CISCO-BGP4-MIB (legacy + v2 OIDs) |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--hostname` | required | Target hostname or IP address |
+| `--version` | 2c | SNMP version (1, 2c, or 3) |
+| `--community` | — | Community string (v1/v2c) |
+| `--username` | — | SNMPv3 username (required for v3) |
+| `--authproto` | SHA | Auth protocol: MD5, SHA, SHA256 |
+| `--privproto` | AES | Priv protocol: DES, AES |
+| `--timeout` | 10 | SNMP timeout in seconds |
+| `--retries` | 2 | SNMP retries |
 
 **Usage:**
 ```bash
-./check_bgp_peer.pl --hostname <HOST> [--version 2c] [--community <COMMUNITY>]
+./check_bgp_peer.pl --hostname <HOST> --community <COMMUNITY>
 ./check_bgp_peer.pl --hostname <HOST> --version 3 --username <USER> --authproto SHA --authpass <PASS> --privproto AES --privpass <PASS>
+```
+
+**Output example:**
+```
+OK: 2/2 BGP peers established [C881-K9] | peers_total=2 peers_established=2 peers_down=0
+Peer=10.1.1.1 ASN=65001 State=established Uptime=30d12h5m
+Peer=10.1.1.2 ASN=65002 State=established Uptime=15d3h22m
 ```
 
 **Requirements:** `Net::SNMP`, `Getopt::Long`
@@ -135,14 +154,6 @@ OK: [puppet-server=puppet.example.com puppet-version=7.29.1] All 3 certificate(s
 ```ini
 [/settings/external scripts/scripts]
 check_puppet_cert_expiry = powershell -ExecutionPolicy Bypass -NonInteractive -File "scripts\check_puppet_certs.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%
-```
-
-**Nagios/Icinga command definition:**
-```
-define command {
-    command_name  check_puppet_certs
-    command_line  $USER1$/check_nrpe -H $HOSTADDRESS$ -c check_puppet_certs
-}
 ```
 
 ---
