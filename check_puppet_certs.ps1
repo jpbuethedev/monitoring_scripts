@@ -15,7 +15,8 @@
     NSClient++ nsclient.ini example:
     -------------------------------------------------------
     [/settings/external scripts/scripts]
-    check_puppet_certs = powershell -ExecutionPolicy Bypass -NonInteractive -File "scripts\check_puppet_certs.ps1" -WarningDays 30 -CriticalDays 7
+    check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& 'scripts\check_cert_expiry.ps1' -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
+
     -------------------------------------------------------
 
     Nagios / Icinga command definition example:
