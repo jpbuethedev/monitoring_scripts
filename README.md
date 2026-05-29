@@ -31,7 +31,15 @@ Perl plugin that checks BGP and EIGRP peer status via SNMP. Supports SNMPv2c and
 
 ### `check_cert_expiry.ps1`
 
-PowerShell plugin that checks certificate expiry and revocation status in the Windows `LocalMachine\My` (Personal) certificate store. Performs online CRL/OCSP revocation checks and outputs Nagios-format performance data.
+PowerShell plugin that inspects all non-self-signed certificates in the Windows `LocalMachine\My` (Personal) certificate store. For each certificate it checks days remaining until expiry against configurable thresholds and performs an online CRL/OCSP revocation check via `X509Chain`. Outputs a Nagios-format status line with summary counts and per-certificate detail lines (CN, expiry date, revocation status, thumbprint). Certificates are deduplicated and sorted by days remaining.
+
+| Feature | Detail |
+|---|---|
+| **Language** | PowerShell |
+| **Certificate store** | `LocalMachine\My` (Personal) |
+| **Revocation check** | Online CRL/OCSP via `X509Chain` (entire chain, 10s timeout) |
+| **Output** | Nagios format with perfdata (`total`, `crit`, `warn`) + per-cert detail lines |
+| **Self-signed** | Automatically skipped |
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -46,11 +54,20 @@ PowerShell plugin that checks certificate expiry and revocation status in the Wi
 .\check_cert_expiry.ps1 -ShowOnlyProblems
 ```
 
+**Output example:**
+```
+OK - Certs: Total=3, Critical=0, Warning=0 | 'total'=3 'crit'=0 'warn'=0
+
+[OK] CN: myserver.example.com
+    Expiry     : 2027-03-15  (290 days)
+    Revocation : OK
+    Thumbprint : A1B2C3D4...
+```
+
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
 check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& "scripts\check_cert_expiry.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
-
 ```
 
 ---
@@ -87,7 +104,14 @@ Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via
 
 ### `check_puppet_certs.ps1`
 
-PowerShell plugin that checks Puppet SSL certificate expiry. Auto-detects the Puppet SSL directory on both Windows and Linux.
+PowerShell plugin that checks Puppet SSL certificate expiry and reports Nagios-format output with performance data. Auto-detects the Puppet SSL directory on both Windows and Linux, scans `certs/` and `ca/signed/` sub-directories for `.pem`/`.crt` files, and classifies each certificate as OK, WARNING, CRITICAL, or EXPIRED. Also reports the configured Puppet server and agent version in the output.
+
+| Feature | Detail |
+|---|---|
+| **Language** | PowerShell (cross-platform) |
+| **Cert parsing** | .NET `X509Certificate2`, `openssl` fallback |
+| **SSL dir detection** | Auto-detect on Windows & Linux, manual override |
+| **Output** | Nagios format with per-certificate perfdata (days remaining) |
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -102,10 +126,23 @@ PowerShell plugin that checks Puppet SSL certificate expiry. Auto-detects the Pu
 .\check_puppet_certs.ps1 -PuppetSslDir "C:\ProgramData\PuppetLabs\puppet\etc\ssl"
 ```
 
+**Output example:**
+```
+OK: [puppet-server=puppet.example.com puppet-version=7.29.1] All 3 certificate(s) are valid (warn=30d crit=7d) | 'agent_days'=364;30;7;0; 'ca_days'=1825;30;7;0;
+```
+
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
 check_puppet_cert_expiry = powershell -ExecutionPolicy Bypass -NonInteractive -File "scripts\check_puppet_certs.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%
+```
+
+**Nagios/Icinga command definition:**
+```
+define command {
+    command_name  check_puppet_certs
+    command_line  $USER1$/check_nrpe -H $HOSTADDRESS$ -c check_puppet_certs
+}
 ```
 
 ---
