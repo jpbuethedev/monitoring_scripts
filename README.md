@@ -98,7 +98,7 @@ Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via
 | Feature | Detail |
 |---|---|
 | **Language** | Perl 5.12+ |
-| **MIBs** | CISCO-RF-MIB (redundancy framework), CISCO-LWAPP-HA-MIB (HA peer health) |
+| **MIBs** | CISCO-RF-MIB (redundancy framework), CISCO-LWAPP-HA-MIB (HA peer health), CISCO-LWAPP-AP-MIB / AIRESPACE-WIRELESS-MIB (AP inventory) |
 | **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
 | **Platform** | Cisco 9800 WLC (SSO HA pair) |
 | **Output** | Nagios format with perfdata (`peer_up`, `duplex`, `unit_state`, `peer_state`, `last_swact_reason`) |
@@ -113,19 +113,26 @@ Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via
 | `--privproto` | AES | Privacy protocol (AES or DES) |
 | `--strict` | off | Escalate unexpected states to CRITICAL |
 | `--hard-strict` | off | Escalate any anomaly to CRITICAL (superset of `--strict`) |
+| `--ap-serial` | off | Walk AP table and include each AP name + serial number in output |
 | `--timeout` | 5 | SNMP timeout in seconds |
 | `--port` | 161 | SNMP port |
 
 **Usage:**
 ```bash
 ./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community 'TurbineNet' --timeout 10
+./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community '<community>' --timeout 10
 ./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --strict
+./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community '<community>' --timeout 10 --ap-serial
 ```
 
 **Output example:**
 ```
 OK - Role=ACTIVE(active); HA Peer: reachable; RF: peer detected (duplex=true); RF PeerState: standbyHot; LastSwact: none | peer_up=1 duplex=1 unit_state=14 peer_state=9 last_swact_reason=2
+```
+
+**Output example (with `--ap-serial`):**
+```
+OK - Role=ACTIVE(active); HA Peer: reachable; RF: peer detected (duplex=true); RF PeerState: standbyHot; LastSwact: none; AP_Serials: AP-Floor1=FCZ2345A001, AP-Floor2=FCZ2345A002 | peer_up=1 duplex=1 unit_state=14 peer_state=9 last_swact_reason=2
 ```
 
 **Requirements:** `Net::SNMP`, `Getopt::Long`
