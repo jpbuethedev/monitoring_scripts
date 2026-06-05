@@ -67,7 +67,7 @@ Usage: $0 --host <ip> [--version 2c|3] [--community <str>]
 
 Examples:
   $0 --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
-  $0 --host 172.26.9.68 --version 2c --community 'TurbineNet' --timeout 10
+  $0 --host 172.26.9.68 --version 2c --community '<community>' --timeout 10
 
 Behavior:
   - Detects local unit role via CISCO-RF-MIB (active vs standbyHot).
