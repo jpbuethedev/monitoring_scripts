@@ -19,6 +19,14 @@ my $OID_cRFStatusDuplexMode      = '1.3.6.1.4.1.9.9.176.1.1.6.0';  # 1=true(peer
 my $OID_cRFStatusPeerUnitState   = '1.3.6.1.4.1.9.9.176.1.1.4.0';  # peer unit state
 my $OID_cRFStatusLastSwactReason = '1.3.6.1.4.1.9.9.176.1.1.8.0';  # last switchover reason
 
+# CISCO-LWAPP-AP-MIB (IOS-XE 9800)
+my $OID_cLApName         = '1.3.6.1.4.1.9.9.513.1.1.1.1.5';  # AP name (table)
+my $OID_cLApSerialNumber = '1.3.6.1.4.1.9.9.513.1.1.1.1.17'; # AP serial number (table)
+
+# AIRESPACE-WIRELESS-MIB (AireOS / 9800 compatibility MIBs — fallback)
+my $OID_bsnAPName         = '1.3.6.1.4.1.14179.2.2.1.1.3';   # AP name
+my $OID_bsnAPSerialNumber = '1.3.6.1.4.1.14179.2.2.1.1.17';  # AP serial number
+
 # RFState map (subset)
 my %RF_STATE = (
   1=>'notKnown', 2=>'disabled', 3=>'initialization', 4=>'negotiation',
@@ -46,6 +54,7 @@ my %opt = (
   port        => 161,
   strict      => 0,        # escalate unexpected states (peer-state mismatch, transitions) to CRITICAL
   hard_strict => 0,        # escalate ANY anomaly to CRITICAL (superset of --strict)
+  ap_serial   => 0,        # also fetch and display all AP serial numbers
 );
 
 sub usage {
@@ -54,7 +63,7 @@ Usage: $0 --host <ip> [--version 2c|3] [--community <str>]
              [--secname <user> --seclevel noAuthNoPriv|authNoPriv|authPriv
               --authproto SHA|MD5 --authpass <pass>
               --privproto AES|DES --privpass <pass>]
-             [--timeout <sec>] [--port 161] [--strict] [--hard-strict]
+             [--timeout <sec>] [--port 161] [--strict] [--hard-strict] [--ap-serial]
 
 Examples:
   $0 --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
@@ -77,6 +86,10 @@ Hard strict (--hard-strict):
   - Includes all of --strict, plus:
   - ACTIVE: any peer_up value other than 1 (including -1, 0, or unexpected) => CRITICAL
   - Any branch: any unexpected value becomes CRITICAL (no UNKNOWN/WARN fallbacks)
+
+AP serial numbers (--ap-serial):
+  - Walks cLApTable (CISCO-LWAPP-AP-MIB) and appends each AP name + serial number to the
+    output message. Useful for inventory and initial discovery.
 USAGE
   ;
   exit 3;
@@ -96,6 +109,7 @@ GetOptions(
   'port=i'        => \$opt{port},
   'strict'        => \$opt{strict},
   'hard-strict'   => \$opt{hard_strict},
+  'ap-serial'     => \$opt{ap_serial},
 ) or usage();
 usage() unless $opt{host};
 
@@ -171,6 +185,37 @@ if ($is_active) {
     $peer_up = -1; # read failed
   }
 }
+
+# --- AP Serial Numbers (optional) ---
+my @ap_serial_msgs;
+if ($opt{ap_serial}) {
+  # Try CISCO-LWAPP-AP-MIB first; fall back to AIRESPACE-WIRELESS-MIB
+  my $ap_serial_tbl = $session->get_table(-baseoid => $OID_cLApSerialNumber);
+  my ($serial_base, $name_base);
+  if ($ap_serial_tbl && scalar keys %$ap_serial_tbl) {
+    $serial_base = $OID_cLApSerialNumber;
+    $name_base   = $OID_cLApName;
+  } else {
+    $ap_serial_tbl = $session->get_table(-baseoid => $OID_bsnAPSerialNumber);
+    if ($ap_serial_tbl && scalar keys %$ap_serial_tbl) {
+      $serial_base = $OID_bsnAPSerialNumber;
+      $name_base   = $OID_bsnAPName;
+    }
+  }
+  if ($ap_serial_tbl && scalar keys %$ap_serial_tbl) {
+    my $ap_name_tbl = $session->get_table(-baseoid => $name_base);
+    for my $oid (sort keys %$ap_serial_tbl) {
+      (my $suffix = $oid) =~ s/^\Q$serial_base\E\.//;
+      my $serial = $ap_serial_tbl->{$oid};
+      my $name   = ($ap_name_tbl && defined $ap_name_tbl->{"$name_base.$suffix"})
+                   ? $ap_name_tbl->{"$name_base.$suffix"}
+                   : "AP[$suffix]";
+      push @ap_serial_msgs, "$name=$serial";
+    }
+  } else {
+    push @ap_serial_msgs, "AP serials unavailable (".$session->error().")";
+  }
+}
 $session->close();
 
 # --- Evaluate ---
@@ -232,6 +277,11 @@ if ($is_active) {
 
 # Add last switchover reason (informational)
 push @msgs, "LastSwact: $reason_name";
+
+# Add AP serial numbers (if requested)
+if (@ap_serial_msgs) {
+  push @msgs, "AP_Serials: ".join(", ", @ap_serial_msgs);
+}
 
 # --- Perfdata ---
 my $peer_up_perf = defined $peer_up ? $peer_up : -1;
