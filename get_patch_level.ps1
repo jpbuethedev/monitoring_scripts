@@ -19,7 +19,7 @@ Try {
     $Minor = $cv.CurrentMinorVersionNumber
 
     # Legacy Windows: Win7/8/8.1 → fallback to 'CurrentVersion'
-    if (-not $Major -or -not $Minor) {
+    if ($null -eq $Major -or $null -eq $Minor) {
         # 'CurrentVersion' is a string like "6.1", "6.2", "6.3"
         $legacyVer = $cv.CurrentVersion
         if ($legacyVer -match '^(\d+)\.(\d+)$') {
