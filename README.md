@@ -172,6 +172,7 @@ OK: [puppet-server=puppet.example.com puppet-version=7.29.1] All 3 certificate(s
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
+;PowerShell plugin that checks Puppet SSL cert expiry.
 check_puppet_cert_expiry = powershell -ExecutionPolicy Bypass -NonInteractive -File "scripts\check_puppet_certs.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%
 ```
 
@@ -201,6 +202,7 @@ OK: Windows Server 2019 Standard 1809 - Version: 10.0 - Build: 17763 - Patch Lev
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
+;PowerShell plugin that reports Windows version, build, and patch level.
 check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_patch_level.ps1"
 ```
 
