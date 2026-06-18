@@ -86,6 +86,7 @@ OK - Certs: Total=3, Critical=0, Warning=0 | 'total'=3 'crit'=0 'warn'=0
 **NSClient++ configuration:**
 ```ini
 [/settings/external scripts/scripts]
+;PowerShell plugin that checks LocalMachine\My cert expiry and revocation.
 check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractive -Command "& "scripts\check_cert_expiry.ps1" -WarningDays %ARG1% -CriticalDays %ARG2%; exit $LASTEXITCODE"
 ```
 
