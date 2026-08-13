@@ -291,3 +291,14 @@ Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failov
 | `interfaces`          | Admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces |
 
 The `hardware` mode uses `CISCO-ENTITY-FRU-CONTROL-MIB` (fan tray/PSU status is not populated via `ENTITY-STATE-MIB` on these platforms) and returns `UNKNOWN` on units where it's not populated at all (e.g. an HA standby unit). The `interfaces` mode monitors every real interface reported via `ifName`/`ifAdminStatus`/`ifOperStatus`, excluding a small set of ASA-internal pseudo-interfaces (`Internal-Data0/1`, `nlp_int_tap`, etc.) — interface naming (`nameif`) varies significantly across firewall pairs, so no fixed interface list is used. Output includes a per-interface `name (alias): UP|DOWN` line for every monitored interface.
+
+`primary_state`/`secondary_state` report the HA pair's **configured role** (which unit is "primary" and which is "secondary" as set in the ASA HA config), not "this host" vs. "the other host" — the role assignment is fixed cluster-wide and is shared by both units' MIBs, so querying either paired unit's IP returns identical output for both modes. Output text says "Primary unit"/"Secondary unit" (never "local"/"peer") to avoid implying the result depends on which IP you queried. The numeric state reflects which of the two units is presently active vs. standby (this does change over time, e.g. after a failover), independent of the fixed primary/secondary role:
+
+| State | Meaning | Status |
+|-------|---------|--------|
+| 9     | Active           | OK |
+| 10    | Standby Ready    | OK |
+| 11    | Standby Cold     | WARNING |
+| 12    | Failed           | CRITICAL |
+
+So a healthy pair always shows one unit as Active (9) and the other as Standby Ready (10) — it does not matter whether the Active one is the primary or the secondary unit. These extended values (9-12) are seen on real devices but go beyond the standard `CISCO-FIREWALL-MIB` `HardwareStatus` textual convention (which only defines up to 10).
