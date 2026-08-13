@@ -274,7 +274,7 @@ All SNMP-based checks support both SNMPv2c and SNMPv3 and will automatically fal
 Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status.
 
 ```bash
-./check_cisco_firewall.py -H <host> -C <community> --mode failover|cpu|memory|connections|uptime|role|numeric_state|peer_role|peer_numeric_state|sysinfo|hardware|interfaces [--warning <n>] [--critical <n>]
+./check_cisco_firewall.py -H <host> -C <community> --mode failover|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--warning <n>] [--critical <n>]
 ```
 
 | Mode                 | Description                                                              |
@@ -284,10 +284,8 @@ Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failov
 | `memory`              | System/data-plane memory pool usage; `--warning`/`--critical` are percent (default 80/90) |
 | `connections`         | Current in-use connection count; `--warning`/`--critical` are connection counts |
 | `uptime`              | Time since last reboot (`sysUpTime`); `--warning`/`--critical` are minimum seconds |
-| `role`                | Text HA role of the primary/local unit (`cfwHardwareStatusDetail`) |
-| `numeric_state`       | Numeric HA state of the primary/local unit (`cfwHardwareStatusValue`) |
-| `peer_role`           | Text HA role of the peer unit |
-| `peer_numeric_state`  | Numeric HA state of the peer unit |
+| `primary_state`       | Combined text role and numeric HA state of the primary unit (`cfwHardwareStatusDetail`/`cfwHardwareStatusValue` index 6) - same result regardless of which paired unit's IP is queried |
+| `secondary_state`     | Combined text role and numeric HA state of the secondary unit (`cfwHardwareStatusDetail`/`cfwHardwareStatusValue` index 7) - same result regardless of which paired unit's IP is queried |
 | `sysinfo`             | Hardware description and hostname (`sysDescr`, `sysName`) |
 | `hardware`            | Fan tray / power supply operational status |
 | `interfaces`          | Admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces |

@@ -7,7 +7,7 @@
 #            ( -C/--community <snmp-community> | --user <snmpv3-user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]
 #              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
 #            [ -t/--timeout <seconds> ] [ -v/--verbose ]
-#            --mode failover|cpu|memory|connections|uptime|role|numeric_state|peer_role|peer_numeric_state|sysinfo|hardware|interfaces
+#            --mode failover|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
 #            [ --warning <threshold> ] [ --critical <threshold> ]
 #
 # Modes:
@@ -16,10 +16,10 @@
 #   memory              - system/data-plane memory pool usage; --warning/--critical are percent (default 80/90)
 #   connections         - current in-use connections; --warning/--critical are connection counts
 #   uptime              - sysUpTime since last reboot; --warning/--critical are minimum seconds (optional)
-#   role                - text HA role of the primary/local unit (cfwHardwareStatusDetail)
-#   numeric_state       - numeric HA state of the primary/local unit (cfwHardwareStatusValue)
-#   peer_role           - text HA role of the peer unit (cfwHardwareStatusDetail)
-#   peer_numeric_state  - numeric HA state of the peer unit (cfwHardwareStatusValue)
+#   primary_state       - combined text role and numeric HA state of the primary unit (cfwHardwareStatusDetail/Value index 6);
+#                          same result regardless of which paired unit's IP is queried
+#   secondary_state      - combined text role and numeric HA state of the secondary unit (cfwHardwareStatusDetail/Value index 7);
+#                          same result regardless of which paired unit's IP is queried
 #   sysinfo             - hardware description and hostname (sysDescr, sysName)
 #   hardware            - fan tray / power supply operational status (cefcFanTrayOperStatus, cefcFRUPowerOperStatus)
 #   interfaces          - admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces (ifName, ifAdminStatus, ifOperStatus)
@@ -308,63 +308,57 @@ def check_uptime(args, warning, critical):
     sys.exit(exit_code)
 
 
-def check_peer_role(args):
-    _check_role(args, HW_INDEX_SECONDARY, "Peer role")
-
-
-def check_role(args):
-    _check_role(args, HW_INDEX_PRIMARY, "Role")
-
-
-def _check_role(args, hw_index, label):
+def _check_combined_state(args, hw_index, label):
     detail, rc = pysnmp_get(args, f"{OIDS['cfwHardwareStatusDetail']}.{hw_index}")
     if rc != 0:
         print(detail)
         sys.exit(rc)
 
-    text = snmp_value_to_str(detail)
-    if _is_missing(text) or not text.strip():
-        print(f"UNKNOWN - No {label.lower()} information available (failover not configured?)")
-        sys.exit(3)
-
-    lower = text.lower()
-    if "active" in lower:
-        exit_code, role = 0, "Active unit"
-    elif "standby" in lower and "cold" not in lower:
-        exit_code, role = 0, "Standby unit"
-    else:
-        exit_code, role = 2, text
-
-    status = NAGIOS_STATUS[exit_code]
-    print(f"{status} - {label}: {role}")
-    sys.exit(exit_code)
-
-
-def check_peer_numeric_state(args):
-    _check_numeric_state(args, HW_INDEX_SECONDARY, "Peer state", "peer_state")
-
-
-def check_numeric_state(args):
-    _check_numeric_state(args, HW_INDEX_PRIMARY, "State", "state")
-
-
-def _check_numeric_state(args, hw_index, label, perf_label):
     value, rc = pysnmp_get(args, f"{OIDS['cfwHardwareStatusValue']}.{hw_index}")
     if rc != 0:
         print(value)
         sys.exit(rc)
 
-    if _is_missing(value):
-        print(f"UNKNOWN - No {label.lower()} information available (failover not configured?)")
+    text = snmp_value_to_str(detail)
+    if (_is_missing(text) or not text.strip()) and _is_missing(value):
+        print("UNKNOWN - No role/state information available (failover not configured?)")
         sys.exit(3)
 
-    numeric = int(value)
-    state_label, failover_safe = PEER_NUMERIC_STATE_MAP.get(numeric, ("Forming/Unknown", False))
-    exit_code = 0 if failover_safe else 2
+    if _is_missing(text) or not text.strip():
+        role_exit, role = 3, "unknown"
+    else:
+        lower = text.lower()
+        if "active" in lower:
+            role_exit, role = 0, "Active unit"
+        elif "standby" in lower and "cold" not in lower:
+            role_exit, role = 0, "Standby unit"
+        else:
+            role_exit, role = 2, text
 
+    if _is_missing(value):
+        state_exit, state_label, numeric = 3, "unknown", None
+    else:
+        numeric = int(value)
+        state_label, failover_safe = PEER_NUMERIC_STATE_MAP.get(numeric, ("Forming/Unknown", False))
+        state_exit = 0 if failover_safe else 2
+
+    exit_code = max(role_exit, state_exit)
     status = NAGIOS_STATUS[exit_code]
-    print(f"{status} - {label}: {state_label} ({numeric}) | {perf_label}={numeric};;;;")
+    numeric_str = str(numeric) if numeric is not None else "n/a"
+
+    # hw_index (6=primary, 7=secondary) is a fixed configured role shared by the whole HA pair,
+    # so querying either paired unit's IP returns identical output - the label makes that explicit
+    # instead of implying "local"/"peer" relative to the queried hostname.
+    print(f"{status} - {label}: {role}, State: {state_label} ({numeric_str}) | state={numeric_str if numeric is not None else ''};;;;")
     sys.exit(exit_code)
+
+
+def check_primary_state(args):
+    _check_combined_state(args, HW_INDEX_PRIMARY, "Primary unit")
+
+
+def check_secondary_state(args):
+    _check_combined_state(args, HW_INDEX_SECONDARY, "Secondary unit")
 
 
 def check_sysinfo(args):
@@ -516,18 +510,16 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
     parser.add_argument("--mode", required=True, metavar="MODE",
                         choices=["failover", "cpu", "memory", "connections",
-                                 "uptime", "role", "numeric_state",
-                                 "peer_role", "peer_numeric_state", "sysinfo", "hardware", "interfaces"],
+                                 "uptime", "primary_state",
+                                 "secondary_state", "sysinfo", "hardware", "interfaces"],
                         help="A keyword which tells the plugin what to do\n"
                              "    failover              (Check the HA failover status of the primary/secondary units)\n"
                              "    cpu                   (Check the average CPU load of the device)\n"
                              "    memory                (Check the memory pool usage of the device)\n"
                              "    connections           (Check the current in-use connection count)\n"
                              "    uptime                (Check the uptime since the last reboot)\n"
-                             "    role                  (Check the text HA role of the primary/local unit)\n"
-                             "    numeric_state         (Check the numeric HA state of the primary/local unit)\n"
-                             "    peer_role             (Check the text HA role of the peer unit)\n"
-                             "    peer_numeric_state    (Check the numeric HA state of the peer unit)\n"
+                             "    primary_state         (Check the combined text role and numeric HA state of the primary unit - same result on either paired IP)\n"
+                             "    secondary_state       (Check the combined text role and numeric HA state of the secondary unit - same result on either paired IP)\n"
                              "    sysinfo               (Report the hardware description and hostname)\n"
                              "    hardware              (Check the fan tray / power supply operational status)\n"
                              "    interfaces            (Check the admin/oper status of the monitored named interfaces)")
@@ -553,14 +545,10 @@ def main():
         check_connections(args, args.warning, args.critical)
     elif args.mode == "uptime":
         check_uptime(args, args.warning, args.critical)
-    elif args.mode == "role":
-        check_role(args)
-    elif args.mode == "numeric_state":
-        check_numeric_state(args)
-    elif args.mode == "peer_role":
-        check_peer_role(args)
-    elif args.mode == "peer_numeric_state":
-        check_peer_numeric_state(args)
+    elif args.mode == "primary_state":
+        check_primary_state(args)
+    elif args.mode == "secondary_state":
+        check_secondary_state(args)
     elif args.mode == "sysinfo":
         check_sysinfo(args)
     elif args.mode == "hardware":
