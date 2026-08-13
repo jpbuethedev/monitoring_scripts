@@ -274,12 +274,12 @@ All SNMP-based checks support both SNMPv2c and SNMPv3 and will automatically fal
 Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status.
 
 ```bash
-./check_cisco_firewall.py -H <host> -C <community> --mode failover|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--warning <n>] [--critical <n>]
+./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--warning <n>] [--critical <n>]
 ```
 
 | Mode                 | Description                                                              |
 |----------------------|---------------------------------------------------------------------------|
-| `failover`           | HA state of both the primary and secondary units (`cfwHardwareStatusValue`) |
+| `ha_summary`          | HA state of both the primary and secondary units (`cfwHardwareStatusValue`) |
 | `cpu`                 | Average CPU load (5s/1m/5m); `--warning`/`--critical` are percent (default 80/90) |
 | `memory`              | System/data-plane memory pool usage; `--warning`/`--critical` are percent (default 80/90) |
 | `connections`         | Current in-use connection count; `--warning`/`--critical` are connection counts |

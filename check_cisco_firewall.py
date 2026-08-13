@@ -7,11 +7,11 @@
 #            ( -C/--community <snmp-community> | --user <snmpv3-user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]
 #              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
 #            [ -t/--timeout <seconds> ] [ -v/--verbose ]
-#            --mode failover|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
+#            --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
 #            [ --warning <threshold> ] [ --critical <threshold> ]
 #
 # Modes:
-#   failover            - HA state of the primary/secondary hardware units (cfwHardwareStatusValue)
+#   ha_summary          - HA state of the primary/secondary hardware units (cfwHardwareStatusValue)
 #   cpu                 - average CPU load (5s/1m/5m); --warning/--critical are percent (default 80/90)
 #   memory              - system/data-plane memory pool usage; --warning/--critical are percent (default 80/90)
 #   connections         - current in-use connections; --warning/--critical are connection counts
@@ -86,7 +86,7 @@ def _is_missing(value):
     return "no such" in snmp_value_to_str(value).lower()
 
 
-def check_failover(args):
+def check_ha_summary(args):
     oid = OIDS["cfwHardwareStatusValue"]
 
     primary, rc = pysnmp_get(args, f"{oid}.{HW_INDEX_PRIMARY}")
@@ -509,11 +509,11 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
     parser.add_argument("--mode", required=True, metavar="MODE",
-                        choices=["failover", "cpu", "memory", "connections",
+                        choices=["ha_summary", "cpu", "memory", "connections",
                                  "uptime", "primary_state",
                                  "secondary_state", "sysinfo", "hardware", "interfaces"],
                         help="A keyword which tells the plugin what to do\n"
-                             "    failover              (Check the HA failover status of the primary/secondary units)\n"
+                             "    ha_summary            (Check the HA failover status of the primary/secondary units)\n"
                              "    cpu                   (Check the average CPU load of the device)\n"
                              "    memory                (Check the memory pool usage of the device)\n"
                              "    connections           (Check the current in-use connection count)\n"
@@ -533,8 +533,8 @@ def main():
         print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
         sys.exit(3)
 
-    if args.mode == "failover":
-        check_failover(args)
+    if args.mode == "ha_summary":
+        check_ha_summary(args)
     elif args.mode == "cpu":
         check_cpu(args, args.warning if args.warning is not None else 80.0,
                   args.critical if args.critical is not None else 90.0)
