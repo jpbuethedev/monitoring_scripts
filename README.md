@@ -216,3 +216,80 @@ check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_pa
 | 1 | WARNING |
 | 2 | CRITICAL |
 | 3 | UNKNOWN |
+# wpp-service-checks-python
+
+Nagios/Icinga-style Python check plugins for monitoring Cisco network devices (via SNMP) and VMware ESXi/vCenter (via the vSphere API).
+
+All checks follow the standard Nagios plugin exit code convention:
+
+| Code | Status   |
+|------|----------|
+| 0    | OK       |
+| 1    | WARNING  |
+| 2    | CRITICAL |
+| 3    | UNKNOWN  |
+
+Most scripts print a single-line summary followed by `| perfdata` performance data. Pass `--multiline` for a more verbose, human-readable breakdown.
+
+## Requirements
+
+- Python 3 (scripts target the RHEL `rh-python38` SCL interpreter via their shebang; adjust as needed for your environment)
+- [`pysnmp`](https://pypi.org/project/pysnmp/) — used by the pysnmp-based helpers in `ves_snmp_utils.py`
+- Net-SNMP CLI tools (`snmpwalk`, `snmpget`) — used by the subprocess-based helpers in `ves_snmp_utils.py`
+- [`pyvmomi`](https://pypi.org/project/pyvmomi/) (`pyVim`, `pyVmomi`) — required only by [check_ves_vmware_esx_listvms.py](check_ves_vmware_esx_listvms.py)
+- [`check_nwc_health`](https://labs.consol.de/nagios/check_nwc_health/) installed at `/usr/local/nagios/libexec/check_nwc_health` — required by [check_ves_interface.py](check_ves_interface.py) and [check_ves_licenses.py](check_ves_licenses.py)
+
+Install the Python dependencies with:
+
+```bash
+pip install pysnmp pyvmomi
+```
+
+## Shared module: `ves_snmp_utils.py`
+
+[ves_snmp_utils.py](ves_snmp_utils.py) provides the common building blocks used by the `check_ves_*` scripts:
+
+- **Subprocess-based SNMP** (shells out to `snmpwalk`/`snmpget`): `run_snmpwalk()`, `run_snmpwalk_lines()`, `run_snmpwalk_host()`, `parse_snmp_string_output()`
+- **pysnmp library-based SNMP**: `pysnmp_get()`, `pysnmp_walk()`, `pysnmp_walk_dict()`, `pysnmp_walk_indexed()`, `pysnmp_walk_multi_indexed()`, `snmp_value_to_str()`
+- **Common helpers**: `add_snmp_args()` (adds the standard SNMPv2c/v3 CLI arguments to an `argparse` parser), `is_auth_error()`, the `OIDS` dictionary of well-known Cisco/MIB-II OIDs, and the `NAGIOS_STATUS` / `CISCO_ENV_STATE_MAP` lookup tables
+
+All SNMP-based checks support both SNMPv2c and SNMPv3 and will automatically fall back from v3 to v2c (or vice versa) when credentials for both are supplied.
+
+### Common SNMP arguments (`add_snmp_args`)
+
+| Argument      | Description                                                        |
+|---------------|---------------------------------------------------------------------|
+| `--hostname`  | Target device hostname or IP (required)                             |
+| `--community` | SNMPv2c community string                                            |
+| `--user`      | SNMPv3 username                                                     |
+| `--seclevel`  | SNMPv3 security level: `noAuthNoPriv`, `authNoPriv`, `authPriv` (default `authPriv`) |
+| `--auth`      | SNMPv3 auth protocol (default `sha`)                                 |
+| `--authpw`    | SNMPv3 auth password                                                 |
+| `--priv`      | SNMPv3 privacy protocol (default `aes`)                              |
+| `--privpw`    | SNMPv3 privacy password                                              |
+| `--timeout`   | SNMP timeout in seconds (default varies by script)                   |
+| `--multiline` | Print verbose, multi-line output instead of a single summary line    |
+
+### [check_cisco_firewall.py](check_cisco_firewall.py)
+Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status.
+
+```bash
+./check_cisco_firewall.py -H <host> -C <community> --mode failover|cpu|memory|connections|uptime|role|numeric_state|peer_role|peer_numeric_state|sysinfo|hardware|interfaces [--warning <n>] [--critical <n>]
+```
+
+| Mode                 | Description                                                              |
+|----------------------|---------------------------------------------------------------------------|
+| `failover`           | HA state of both the primary and secondary units (`cfwHardwareStatusValue`) |
+| `cpu`                 | Average CPU load (5s/1m/5m); `--warning`/`--critical` are percent (default 80/90) |
+| `memory`              | System/data-plane memory pool usage; `--warning`/`--critical` are percent (default 80/90) |
+| `connections`         | Current in-use connection count; `--warning`/`--critical` are connection counts |
+| `uptime`              | Time since last reboot (`sysUpTime`); `--warning`/`--critical` are minimum seconds |
+| `role`                | Text HA role of the primary/local unit (`cfwHardwareStatusDetail`) |
+| `numeric_state`       | Numeric HA state of the primary/local unit (`cfwHardwareStatusValue`) |
+| `peer_role`           | Text HA role of the peer unit |
+| `peer_numeric_state`  | Numeric HA state of the peer unit |
+| `sysinfo`             | Hardware description and hostname (`sysDescr`, `sysName`) |
+| `hardware`            | Fan tray / power supply operational status |
+| `interfaces`          | Admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces |
+
+The `hardware` mode uses `CISCO-ENTITY-FRU-CONTROL-MIB` (fan tray/PSU status is not populated via `ENTITY-STATE-MIB` on these platforms) and returns `UNKNOWN` on units where it's not populated at all (e.g. an HA standby unit). The `interfaces` mode monitors every real interface reported via `ifName`/`ifAdminStatus`/`ifOperStatus`, excluding a small set of ASA-internal pseudo-interfaces (`Internal-Data0/1`, `nlp_int_tap`, etc.) — interface naming (`nameif`) varies significantly across firewall pairs, so no fixed interface list is used. Output includes a per-interface `name (alias): UP|DOWN` line for every monitored interface.
