@@ -81,6 +81,59 @@ def _is_missing(value):
     return "no such" in snmp_value_to_str(value).lower()
 
 
+def _chunk_evenly(values, n):
+    """Split a list into n roughly-equal contiguous chunks (extra items go to the earliest chunks)."""
+    if n <= 0:
+        return []
+    size, remainder = divmod(len(values), n)
+    chunks, start = [], 0
+    for i in range(n):
+        end = start + size + (1 if i < remainder else 0)
+        chunks.append(values[start:end])
+        start = end
+    return chunks
+
+
+def _group_sensor_readings(sensor_types, sensor_values, sensor_scales):
+    """Best-effort grouping of CISCO-ENTITY-SENSOR-MIB readings on this platform.
+    entPhysicalContainedIn does not extend to the sensor indices here, so there is no
+    MIB-guaranteed way to attribute a reading to a specific named fan/PSU. Empirically,
+    each PSU's electrical block starts with a voltsAC/voltsDC reading (amps/watts/temp/
+    internal-fan-rpm follow); RPM readings found outside of a PSU block are chassis fan
+    tachometers. Returns (chassis_fan_rpms, psu_voltages), both ascending-index-ordered
+    lists to be distributed across the fan tray / PSU rows found via
+    cefcFanTrayOperStatus / cefcFRUPowerOperStatus.
+    """
+    items = sorted(
+        (idx, int(sensor_types[idx]), int(sensor_values[idx]), int(sensor_scales.get(idx, 9)))
+        for idx in sensor_types if idx in sensor_values
+    )
+
+    def actual(raw, scale):
+        return raw * (10 ** ((scale - 9) * 3))
+
+    consumed_rpm_idx = set()
+    psu_voltages = []
+    i = 0
+    while i < len(items):
+        idx, sensor_type, raw, scale = items[i]
+        if sensor_type in (3, 4):  # voltsAC / voltsDC starts a new PSU electrical block
+            psu_voltages.append(actual(raw, scale))
+            i += 1
+            while i < len(items) and items[i][1] not in (3, 4, 12):
+                if items[i][1] == 10:
+                    consumed_rpm_idx.add(items[i][0])
+                i += 1
+        else:
+            i += 1
+
+    chassis_fan_rpms = [
+        actual(raw, scale) for idx, sensor_type, raw, scale in items
+        if sensor_type == 10 and idx not in consumed_rpm_idx
+    ]
+    return chassis_fan_rpms, psu_voltages
+
+
 def check_ha_summary(args):
     oid = OIDS["cfwHardwareStatusValue"]
 
@@ -390,8 +443,25 @@ def check_hardware(args):
         print(psu_status)
         sys.exit(rc)
 
-    components = []  # (name, state_label, severity)
+    # CISCO-ENTITY-SENSOR-MIB voltage/RPM readings. Best-effort: not every platform
+    # populates this MIB, so a failed walk here just means readings show as "-".
+    sensor_types, rc_sensors = pysnmp_walk_indexed(args, OIDS["entSensorType"])
+    if rc_sensors != 0:
+        sensor_types = {}
+    sensor_values, rc_sensors = pysnmp_walk_indexed(args, OIDS["entSensorValue"])
+    if rc_sensors != 0:
+        sensor_values = {}
+    sensor_scales, rc_sensors = pysnmp_walk_indexed(args, OIDS["entSensorScale"])
+    if rc_sensors != 0:
+        sensor_scales = {}
 
+    chassis_fan_rpms, psu_voltages = _group_sensor_readings(sensor_types, sensor_values, sensor_scales)
+    fan_rpm_chunks = _chunk_evenly(chassis_fan_rpms, len(fan_status))
+    psu_voltage_chunks = _chunk_evenly(psu_voltages, len(psu_status))
+
+    components = []  # (name, state_label, severity, voltage_str, rpm_str)
+
+    fan_i = 0
     for idx, value in fan_status.items():
         # entPhysicalClass filter also guards against a walk drifting into an unrelated OID subtree
         if int(classes.get(idx, -1)) != ENT_PHYSICAL_CLASS_FAN:
@@ -400,8 +470,12 @@ def check_hardware(args):
         state_label = FAN_TRAY_STATUS_MAP.get(state_num, f"unknown({state_num})")
         severity = FAN_TRAY_STATUS_SEVERITY.get(state_num, 2)
         name = snmp_value_to_str(descrs.get(idx, f"Fan tray {idx}")).strip() or f"Fan tray {idx}"
-        components.append((name, state_label, severity))
+        rpm_values = fan_rpm_chunks[fan_i] if fan_i < len(fan_rpm_chunks) else []
+        fan_i += 1
+        rpm = "/".join(f"{v:.0f}" for v in rpm_values) if rpm_values else "-"
+        components.append((name, state_label, severity, "-", rpm))
 
+    psu_i = 0
     for idx, value in psu_status.items():
         if int(classes.get(idx, -1)) != ENT_PHYSICAL_CLASS_POWER_SUPPLY:
             continue
@@ -409,16 +483,19 @@ def check_hardware(args):
         state_label = FRU_POWER_OPER_STATUS_MAP.get(state_num, f"unknown({state_num})")
         severity = 0 if state_num == FRU_POWER_OPER_STATUS_OK else 2
         name = snmp_value_to_str(descrs.get(idx, f"Power supply {idx}")).strip() or f"Power supply {idx}"
-        components.append((name, state_label, severity))
+        voltage_values = psu_voltage_chunks[psu_i] if psu_i < len(psu_voltage_chunks) else []
+        psu_i += 1
+        voltage = "/".join(f"{v:.1f}V" for v in voltage_values) if voltage_values else "-"
+        components.append((name, state_label, severity, voltage, "-"))
 
     if not components:
         print("UNKNOWN - No fan tray/power supply status available (not populated on this unit, e.g. HA standby)")
         sys.exit(3)
 
-    exit_code = max(sev for _, _, sev in components)
+    exit_code = max(sev for _, _, sev, _, _ in components)
     status = NAGIOS_STATUS[exit_code]
 
-    bad = [(name, state) for name, state, sev in components if sev != 0]
+    bad = [(name, state) for name, state, sev, _, _ in components if sev != 0]
     if bad:
         detail = ", ".join(f"{name}={state}" for name, state in bad)
         summary = f"{status} - {len(bad)} of {len(components)} fan/PSU component(s) not OK: {detail}"
@@ -427,6 +504,11 @@ def check_hardware(args):
 
     perf = f"components_total={len(components)};;;; components_bad={len(bad)};;;;"
     print(f"{summary} | {perf}")
+
+    table = [f"{'Device Name':<20}{'Device Voltage':>16}{'Device RPM':>12}{'Device Status':>15}"]
+    for name, state_label, _, voltage, rpm in components:
+        table.append(f"{name:<20}{voltage:>16}{rpm:>12}{state_label:>15}")
+    print("\n".join(table))
     sys.exit(exit_code)
 
 
