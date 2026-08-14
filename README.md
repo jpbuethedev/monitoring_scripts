@@ -274,7 +274,7 @@ All SNMP-based checks support both SNMPv2c and SNMPv3 and will automatically fal
 Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status.
 
 ```bash
-./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--warning <n>] [--critical <n>]
+./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [-w/--warning <n>] [-c/--critical <n>]
 ```
 
 | Mode                 | Description                                                              |
@@ -282,7 +282,7 @@ Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failov
 | `ha_summary`          | HA state of both the primary and secondary units (`cfwHardwareStatusValue`) |
 | `cpu`                 | Average CPU load (5s/1m/5m); `--warning`/`--critical` are percent (default 80/90) |
 | `memory`              | System/data-plane memory pool usage; `--warning`/`--critical` are percent (default 80/90) |
-| `connections`         | Current in-use connection count; `--warning`/`--critical` are connection counts |
+| `connections`         | Current in-use connection count, with peak/failed counts included in verbose output and perfdata; `--warning`/`--critical` are connection counts |
 | `uptime`              | Time since last reboot (`sysUpTime`); `--warning`/`--critical` are minimum seconds |
 | `primary_state`       | Combined text role and numeric HA state of the primary unit (`cfwHardwareStatusDetail`/`cfwHardwareStatusValue` index 6) - same result regardless of which paired unit's IP is queried |
 | `secondary_state`     | Combined text role and numeric HA state of the secondary unit (`cfwHardwareStatusDetail`/`cfwHardwareStatusValue` index 7) - same result regardless of which paired unit's IP is queried |

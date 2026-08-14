@@ -160,10 +160,10 @@ OIDS = {
     "cfwHardwareStatusValue":     "1.3.6.1.4.1.9.9.147.1.2.1.1.1.3",
     "cfwHardwareStatusDetail":    "1.3.6.1.4.1.9.9.147.1.2.1.1.1.4",
 
-    # CISCO-FIREWALL-MIB — Connection statistics (indexed by service, then stat type)
-    "cfwConnectionStatValue":     "1.3.6.1.4.1.9.9.147.1.2.2.2.1.5",
-    "cfwConnectionPerSecond":     "1.3.6.1.4.1.9.9.147.1.2.2.3",
-    "cfwConnectionPerSecondPeak": "1.3.6.1.4.1.9.9.147.1.2.2.4",
+    # Connection statistics (scalar OIDs, device-verified)
+    "connActiveConnections":  "1.3.6.1.4.1.9.9.171.1.2.1.3.0",
+    "connPeakConnections":    "1.3.6.1.4.1.9.9.171.1.2.1.4.0",
+    "connFailedConnections":  "1.3.6.1.4.1.9.9.171.1.2.1.6.0",
 
     # CISCO-ENHANCED-MEMPOOL-MIB — used on ASA/FTD platforms instead of CISCO-MEMORY-POOL-MIB
     # (indexed by entPhysicalIndex, then cempMemPoolIndex)
@@ -195,6 +195,12 @@ def is_auth_error(output):
     """Check if SNMP output indicates an authentication/authorization failure."""
     lower = output.lower()
     return any(p in lower for p in _AUTH_ERROR_PATTERNS)
+
+
+def is_timeout_error(indication):
+    """Check if an SNMP errorIndication represents a timeout/unreachable host."""
+    lower = str(indication).lower()
+    return "timeout" in lower or "timed out" in lower
 
 
 # -------------------------
@@ -264,7 +270,7 @@ def _pysnmp_get_single(args, oid, auth_data):
         iterator = getCmd(
             SnmpEngine(),
             auth_data,
-            UdpTransportTarget((args.hostname, 161), timeout=args.timeout, retries=1),
+            UdpTransportTarget((args.hostname, 161), timeout=args.timeout, retries=0),
             ContextData(),
             ObjectType(ObjectIdentity(oid))
         )
@@ -272,6 +278,8 @@ def _pysnmp_get_single(args, oid, auth_data):
         if errorIndication:
             if "authorization" in str(errorIndication).lower():
                 return "CRITICAL - Invalid credentials", 2
+            if is_timeout_error(errorIndication):
+                return f"UNKNOWN - SNMP timeout: {errorIndication}", 3
             return f"CRITICAL - SNMP error: {errorIndication}", 2
         if errorStatus:
             return f"CRITICAL - SNMP error at {errorIndex}: {errorStatus.prettyPrint()}", 2
@@ -305,7 +313,7 @@ def _pysnmp_walk_raw(args, oid, auth_data):
         for errorIndication, errorStatus, errorIndex, varBinds in nextCmd(
             SnmpEngine(),
             auth_data,
-            UdpTransportTarget((args.hostname, 161), timeout=args.timeout, retries=1),
+            UdpTransportTarget((args.hostname, 161), timeout=args.timeout, retries=0),
             ContextData(),
             ObjectType(ObjectIdentity(oid)),
             lexicographicMode=False
@@ -313,6 +321,8 @@ def _pysnmp_walk_raw(args, oid, auth_data):
             if errorIndication:
                 if "authorization" in str(errorIndication).lower():
                     return "CRITICAL - Invalid credentials", 2
+                if is_timeout_error(errorIndication):
+                    return f"UNKNOWN - SNMP timeout: {errorIndication}", 3
                 return f"CRITICAL - SNMP error: {errorIndication}", 2
             if errorStatus:
                 return f"CRITICAL - SNMP error at {errorIndex}: {errorStatus.prettyPrint()}", 2

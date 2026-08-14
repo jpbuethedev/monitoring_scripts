@@ -8,7 +8,7 @@
 #              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
 #            [ -t/--timeout <seconds> ] [ -v/--verbose ]
 #            --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
-#            [ --warning <threshold> ] [ --critical <threshold> ]
+#            [ -w/--warning <threshold> ] [ -c/--critical <threshold> ]
 #
 # Modes:
 #   ha_summary          - HA state of the primary/secondary hardware units (cfwHardwareStatusValue)
@@ -37,11 +37,6 @@ HARDWARE_STATUS_MAP = {
     1: "other", 2: "up", 3: "down", 4: "error", 5: "overTemp",
     6: "busy", 7: "noMedia", 8: "backup", 9: "active", 10: "standby",
 }
-
-# CISCO-FIREWALL-MIB ConnectionStat type indices (the service index varies by platform)
-CONN_TYPE_CURRENT_OPEN = 3
-CONN_TYPE_CURRENT_IN_USE = 6
-CONN_TYPE_HIGH = 7
 
 # Peer HA state machine values reported on the secondary/peer cfwHardwareStatusValue instance
 # (platform-specific extension beyond the base HardwareStatus textual convention)
@@ -237,44 +232,42 @@ def check_memory(args, warning, critical):
 
 
 def check_connections(args, warning, critical):
-    # cfwConnectionStatTable is indexed by (service, statType). The service index used for
-    # the whole-firewall aggregate varies by platform (e.g. otherFWService=1 on classic ASA,
-    # protoIp=40 on FTD/Secure Firewall), so discover it by walking the table instead of
-    # assuming a fixed service index.
-    stats, rc = pysnmp_walk_multi_indexed(args, OIDS["cfwConnectionStatValue"])
+    active, rc = pysnmp_get(args, OIDS["connActiveConnections"])
     if rc != 0:
-        print(stats)
+        print(active)
         sys.exit(rc)
-
-    in_use_rows = {service: val for (service, stat_type), val in stats.items()
-                   if stat_type == CONN_TYPE_CURRENT_IN_USE}
-    if not in_use_rows:
+    if _is_missing(active):
         print("UNKNOWN - Connection statistics are not available on this device")
         sys.exit(3)
+    active_val = int(active)
 
-    # The whole-firewall aggregate row reports the largest in-use count
-    service = max(in_use_rows, key=lambda s: int(in_use_rows[s]))
-    in_use_val = int(in_use_rows[service])
-
-    if critical is not None and in_use_val >= critical:
+    if critical is not None and active_val >= critical:
         exit_code = 2
-    elif warning is not None and in_use_val >= warning:
+    elif warning is not None and active_val >= warning:
         exit_code = 1
     else:
         exit_code = 0
 
     status = NAGIOS_STATUS[exit_code]
-    summary = f"{status} - Current connections in use: {in_use_val}"
+    summary = f"{status} - Current connections in use: {active_val}"
+
+    peak, rc_peak = pysnmp_get(args, OIDS["connPeakConnections"])
+    peak_val = int(peak) if rc_peak == 0 and not _is_missing(peak) else None
+    failed, rc_failed = pysnmp_get(args, OIDS["connFailedConnections"])
+    failed_val = int(failed) if rc_failed == 0 and not _is_missing(failed) else None
 
     if args.verbose:
-        open_count = stats.get((service, CONN_TYPE_CURRENT_OPEN))
-        high = stats.get((service, CONN_TYPE_HIGH))
-        if open_count is not None:
-            summary += f", currently open: {int(open_count)}"
-        if high is not None:
-            summary += f", high watermark: {int(high)}"
+        if peak_val is not None:
+            summary += f", peak: {peak_val}"
+        if failed_val is not None:
+            summary += f", failed: {failed_val}"
 
-    perf = f"connections_in_use={in_use_val};{warning if warning is not None else ''};{critical if critical is not None else ''};;"
+    perf = f"connections_in_use={active_val};{warning if warning is not None else ''};{critical if critical is not None else ''};;"
+    if peak_val is not None:
+        perf += f" connections_peak={peak_val};;;;"
+    if failed_val is not None:
+        perf += f" connections_failed={failed_val};;;;"
+
     print(f"{summary} | {perf}")
     sys.exit(exit_code)
 
@@ -523,10 +516,15 @@ def main():
                              "    sysinfo               (Report the hardware description and hostname)\n"
                              "    hardware              (Check the fan tray / power supply operational status)\n"
                              "    interfaces            (Check the admin/oper status of the monitored named interfaces)")
-    parser.add_argument("--warning", type=float,
+    parser.add_argument("--warning", "-w", type=float,
                         help="Warning threshold (percent for cpu/memory, connection count for connections, seconds for uptime)")
-    parser.add_argument("--critical", type=float,
+    parser.add_argument("--critical", "-c", type=float,
                         help="Critical threshold (percent for cpu/memory, connection count for connections, seconds for uptime)")
+
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(3)
+
     args = parser.parse_args()
 
     if not args.community and not args.user:
@@ -558,4 +556,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("UNKNOWN - Check interrupted")
+        sys.exit(3)
+    except Exception as e:
+        print(f"UNKNOWN - Unexpected error: {e}")
+        sys.exit(3)
