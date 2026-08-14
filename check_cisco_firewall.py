@@ -486,7 +486,16 @@ def check_interfaces(args):
 
 
 def main():
+    usage = (
+        "%(prog)s -H/--hostname <host>\n"
+        "           ( -C/--community <community> | --user <user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]\n"
+        "             [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )\n"
+        "           [-t/--timeout <seconds>] [-v/--verbose]\n"
+        "           --mode MODE\n"
+        "           [-w/--warning <threshold>] [-c/--critical <threshold>]"
+    )
     parser = argparse.ArgumentParser(
+        usage=usage,
         description="Nagios plugin to check a Cisco firewall (ASA/FTD/Secure Firewall) via SNMP",
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -516,9 +525,9 @@ def main():
                              "    sysinfo               (Report the hardware description and hostname)\n"
                              "    hardware              (Check the fan tray / power supply operational status)\n"
                              "    interfaces            (Check the admin/oper status of the monitored named interfaces)")
-    parser.add_argument("--warning", "-w", type=float,
+    parser.add_argument("-w", "--warning", type=float,
                         help="Warning threshold (percent for cpu/memory, connection count for connections, seconds for uptime)")
-    parser.add_argument("--critical", "-c", type=float,
+    parser.add_argument("-c", "--critical", type=float,
                         help="Critical threshold (percent for cpu/memory, connection count for connections, seconds for uptime)")
 
     if len(sys.argv) == 1:

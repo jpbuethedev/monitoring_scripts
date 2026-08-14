@@ -302,3 +302,5 @@ The `hardware` mode uses `CISCO-ENTITY-FRU-CONTROL-MIB` (fan tray/PSU status is 
 | 12    | Failed           | CRITICAL |
 
 So a healthy pair always shows one unit as Active (9) and the other as Standby Ready (10) — it does not matter whether the Active one is the primary or the secondary unit. These extended values (9-12) are seen on real devices but go beyond the standard `CISCO-FIREWALL-MIB` `HardwareStatus` textual convention (which only defines up to 10).
+
+Running the script with no arguments prints usage/help and exits `UNKNOWN` instead of argparse's terse error. `--community`/`--user` credentials are required up front (`UNKNOWN` if neither is given). An SNMP timeout (unreachable host) is reported as `UNKNOWN` rather than `CRITICAL`, and any unexpected error or manual interruption (Ctrl+C) is caught and reported as a single-line `UNKNOWN` result instead of a raw Python traceback.
