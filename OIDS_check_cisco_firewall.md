@@ -75,6 +75,17 @@ Fan tray / power supply operational status, plus best-effort voltage/RPM sensor 
 | `entSensorValue` | 1.3.6.1.4.1.9.9.91.1.1.1.1.4 | Best-effort |
 | `entSensorScale` | 1.3.6.1.4.1.9.9.91.1.1.1.1.2 | Best-effort |
 
+### cefcFanTrayOperStatus value meanings
+
+| Value | MIB label | Meaning | Script severity |
+|---|---|---|---|
+| `1` | `unknown` | System can't currently determine the fan tray's status | WARNING |
+| `2` | `up` | Fan tray present and operating normally | OK |
+| `3` | `down` | Fan tray present but not operating / failed | WARNING (downgraded — see note) |
+| `4` | `warning` | Fan tray operating outside normal parameters (degraded) | CRITICAL |
+
+Note: `down(3)` is deliberately downgraded to WARNING instead of CRITICAL because production Secure Firewall 3100 / FTD 7.4.2 units have been observed consistently reporting `down(3)` for the fan tray even when the hardware is otherwise healthy. `warning(4)` is kept at CRITICAL since it reflects a real problem. See `FAN_TRAY_STATUS_MAP`/`FAN_TRAY_STATUS_SEVERITY` in [check_cisco_firewall.py](check_cisco_firewall.py).
+
 ## interfaces
 Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces excluded).
 
