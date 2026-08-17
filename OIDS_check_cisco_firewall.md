@@ -95,3 +95,18 @@ Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces exclude
 | `ifAdminStatus` | 1.3.6.1.2.1.2.2.1.7 |
 | `ifOperStatus` | 1.3.6.1.2.1.2.2.1.8 |
 | `ifAlias` | 1.3.6.1.2.1.31.1.1.1.18 |
+
+## Verifying against native Cisco commands
+
+SSH to the device lands in FXOS on the Secure Firewall 3100 series. For everything except `hardware`, run `connect ftd` then `system support diagnostic-cli` then `enable` to get the classic ASA-style `show` command set.
+
+| Mode | Native command | Where to run |
+|---|---|---|
+| `ha_summary` / `primary_state` / `secondary_state` | `show failover` or `show failover state` | FTD diagnostic-cli |
+| `cpu` | `show cpu usage` | FTD diagnostic-cli |
+| `memory` | `show memory` or `show memory detail` | FTD diagnostic-cli |
+| `connections` | `show conn count` | FTD diagnostic-cli |
+| `uptime` | `show version` | FTD diagnostic-cli |
+| `sysinfo` | `show version` + `show hostname` | FTD diagnostic-cli |
+| `hardware` | `show environment` + `show inventory` | FXOS (chassis owns the hardware on the 3100 series) |
+| `interfaces` | `show interface ip brief` (or `show interface` for detail) + `show nameif` | FTD diagnostic-cli |
