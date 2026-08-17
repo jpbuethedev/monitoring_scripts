@@ -160,10 +160,17 @@ OIDS = {
     "cfwHardwareStatusValue":     "1.3.6.1.4.1.9.9.147.1.2.1.1.1.3",
     "cfwHardwareStatusDetail":    "1.3.6.1.4.1.9.9.147.1.2.1.1.1.4",
 
-    # Connection statistics (scalar OIDs, device-verified)
-    "connActiveConnections":  "1.3.6.1.4.1.9.9.171.1.2.1.3.0",
-    "connPeakConnections":    "1.3.6.1.4.1.9.9.171.1.2.1.4.0",
-    "connFailedConnections":  "1.3.6.1.4.1.9.9.171.1.2.1.6.0",
+    # CISCO-FIREWALL-MIB cfwConnectionStatValue (Gauge32), indexed by
+    # [cfwConnectionStatService=40 (entire firewall), cfwConnectionStatType=6 (currentInUse) / 7 (high)].
+    # NOTE: the previous OIDs here (1.3.6.1.4.1.9.9.171.1.2.1.*) were wrong - that tree is
+    # CISCO-IPSEC-FLOW-MONITOR-MIB (cikeGlobalIn* IKE/IPsec counters), unrelated to firewall
+    # connections; device-verified via snmpwalk on all 4 test units (values were sane: currentInUse
+    # 188-451, high 4560-5040, vs the old OIDs' 6.4M-6.8M/106K-114K IKE octet/packet counters).
+    "connActiveConnections":  "1.3.6.1.4.1.9.9.147.1.2.2.2.1.5.40.6",
+    "connPeakConnections":    "1.3.6.1.4.1.9.9.147.1.2.2.2.1.5.40.7",
+    # No "failed connections" stat exists in cfwConnectionStatTable (ConnectionStat enum has no
+    # failure type) - confirmed via full walk of the table on all 4 test devices, only
+    # currentInUse/high were populated. There is no known equivalent OID for this metric.
 
     # CISCO-ENHANCED-MEMPOOL-MIB — used on ASA/FTD platforms instead of CISCO-MEMORY-POOL-MIB
     # (indexed by entPhysicalIndex, then cempMemPoolIndex)

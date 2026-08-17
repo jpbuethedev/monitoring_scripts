@@ -31,13 +31,14 @@ System/data-plane memory pool usage. Classic table is tried first; enhanced tabl
 | `cempMemPoolFree` | 1.3.6.1.4.1.9.9.221.1.1.1.1.8 | |
 
 ## connections
-Current in-use/peak/failed connection counts (scalar OIDs).
+Current in-use/peak connection counts, from CISCO-FIREWALL-MIB `cfwConnectionStatValue`
+(indexed by service=40 "entire firewall", stat type 6=currentInUse / 7=high). No "failed
+connections" stat exists in this table - that metric was dropped.
 
 | OID name | OID |
 |---|---|
-| `connActiveConnections` | 1.3.6.1.4.1.9.9.171.1.2.1.3.0 |
-| `connPeakConnections` | 1.3.6.1.4.1.9.9.171.1.2.1.4.0 |
-| `connFailedConnections` | 1.3.6.1.4.1.9.9.171.1.2.1.6.0 |
+| `connActiveConnections` | 1.3.6.1.4.1.9.9.147.1.2.2.2.1.5.40.6 |
+| `connPeakConnections` | 1.3.6.1.4.1.9.9.147.1.2.2.2.1.5.40.7 |
 
 ## uptime
 Time since last reboot.

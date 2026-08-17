@@ -306,20 +306,13 @@ def check_connections(args, warning, critical):
 
     peak, rc_peak = pysnmp_get(args, OIDS["connPeakConnections"])
     peak_val = int(peak) if rc_peak == 0 and not _is_missing(peak) else None
-    failed, rc_failed = pysnmp_get(args, OIDS["connFailedConnections"])
-    failed_val = int(failed) if rc_failed == 0 and not _is_missing(failed) else None
 
-    if args.verbose:
-        if peak_val is not None:
-            summary += f", peak: {peak_val}"
-        if failed_val is not None:
-            summary += f", failed: {failed_val}"
+    if args.verbose and peak_val is not None:
+        summary += f", peak: {peak_val}"
 
     perf = f"connections_in_use={active_val};{warning if warning is not None else ''};{critical if critical is not None else ''};;"
     if peak_val is not None:
         perf += f" connections_peak={peak_val};;;;"
-    if failed_val is not None:
-        perf += f" connections_failed={failed_val};;;;"
 
     print(f"{summary} | {perf}")
     sys.exit(exit_code)
@@ -491,7 +484,7 @@ def check_hardware(args):
     if not components:
         # Some logical FTD instances (e.g. a secondary container sharing chassis with another
         # instance) never expose entPhysicalClass fan/PSU rows at all - that's expected, not a fault.
-        print("OK - No fan tray/power supply components reported by this unit")
+        print("OK - No fan tray/power supply components reported by this unit (expected on a secondary/non-primary logical instance)")
         sys.exit(0)
 
     exit_code = max(sev for _, _, sev, _, _ in components)
