@@ -489,8 +489,10 @@ def check_hardware(args):
         components.append((name, state_label, severity, voltage, "-"))
 
     if not components:
-        print("UNKNOWN - No fan tray/power supply status available (not populated on this unit, e.g. HA standby)")
-        sys.exit(3)
+        # Some logical FTD instances (e.g. a secondary container sharing chassis with another
+        # instance) never expose entPhysicalClass fan/PSU rows at all - that's expected, not a fault.
+        print("OK - No fan tray/power supply components reported by this unit")
+        sys.exit(0)
 
     exit_code = max(sev for _, _, sev, _, _ in components)
     status = NAGIOS_STATUS[exit_code]

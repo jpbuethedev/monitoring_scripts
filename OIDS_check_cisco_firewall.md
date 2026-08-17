@@ -86,6 +86,8 @@ Fan tray / power supply operational status, plus best-effort voltage/RPM sensor 
 
 Note: `down(3)` is deliberately downgraded to WARNING instead of CRITICAL because production Secure Firewall 3100 / FTD 7.4.2 units have been observed consistently reporting `down(3)` for the fan tray even when the hardware is otherwise healthy. `warning(4)` is kept at CRITICAL since it reflects a real problem. See `FAN_TRAY_STATUS_MAP`/`FAN_TRAY_STATUS_SEVERITY` in [check_cisco_firewall.py](check_cisco_firewall.py).
 
+Note: some units (e.g. a secondary logical FTD instance sharing chassis with another instance) never report any `entPhysicalClass` fan/PSU rows at all — confirmed live on 10.56.1.227/.229. That's expected on those units, not a fault, so the script exits OK with no fan/PSU components rather than UNKNOWN.
+
 ## interfaces
 Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces excluded).
 
