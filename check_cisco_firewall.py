@@ -7,11 +7,19 @@
 #            ( -C/--community <snmp-community> | --user <snmpv3-user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]
 #              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
 #            [ -t/--timeout <seconds> ] [ -v/--verbose ]
-#            --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
+#            --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
+#            [ --peer-hostname <network-component> ]
 #            [ -w/--warning <threshold> ] [ -c/--critical <threshold> ]
 #
 # Modes:
 #   ha_summary          - HA state of the primary/secondary hardware units (cfwHardwareStatusValue)
+#   ha_pair             - dual-query reachability check: queries both --hostname and --peer-hostname and
+#                          requires both to respond, agree with each other, and report a failover-safe
+#                          numeric state (9=Active or 10=Standby Ready) for the pair. If --peer-hostname
+#                          is omitted, the peer is guessed from --hostname using the +/-2-last-octet IPv4
+#                          convention observed in this environment (e.g. .226/.228) and confirmed by
+#                          querying it; if no candidate can be confirmed, exits WARNING rather than
+#                          guessing blindly - pass --peer-hostname explicitly in that case
 #   cpu                 - average CPU load (5s/1m/5m); --warning/--critical are percent (default 80/90)
 #   memory              - system/data-plane memory pool usage; --warning/--critical are percent (default 80/90)
 #   connections         - current in-use connections; --warning/--critical are connection counts
@@ -25,8 +33,18 @@
 #   interfaces          - admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces (ifName, ifAdminStatus, ifOperStatus)
 
 import argparse
+import copy
+import re
 import sys
 from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_get, pysnmp_walk_indexed, pysnmp_walk_multi_indexed, snmp_value_to_str
+
+IPV4_PATTERN = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
+
+# Observed convention in this environment: paired HA units' management IPs differ by 2 in the
+# last octet (e.g. .226/.228, .227/.229). Used only as a best-effort fallback for --mode ha_pair
+# when --peer-hostname isn't supplied - any guessed candidate is always confirmed via a live SNMP
+# cross-query before being trusted, never assumed blindly.
+PEER_IP_OFFSET_CANDIDATES = (2, -2)
 
 # CISCO-FIREWALL-MIB Hardware textual convention indices used by cfwHardwareStatusTable
 HW_INDEX_PRIMARY = 6
@@ -134,6 +152,14 @@ def _group_sensor_readings(sensor_types, sensor_values, sensor_scales):
     return chassis_fan_rpms, psu_voltages
 
 
+def _hw_status_label(numeric):
+    """Resolve a cfwHardwareStatusValue reading to a display label, preferring the more
+    specific peer HA state machine labels (11=Standby Cold, 12=Failed) over generic "unknown"."""
+    if numeric in (11, 12):
+        return PEER_NUMERIC_STATE_MAP[numeric][0].lower()
+    return HARDWARE_STATUS_MAP.get(numeric, "unknown")
+
+
 def check_ha_summary(args):
     oid = OIDS["cfwHardwareStatusValue"]
 
@@ -151,11 +177,11 @@ def check_ha_summary(args):
         print("UNKNOWN - Failover is not configured on this unit (standalone)")
         sys.exit(3)
 
-    primary_state = "not present" if _is_missing(primary) else HARDWARE_STATUS_MAP.get(int(primary), "unknown")
-    secondary_state = "not present" if _is_missing(secondary) else HARDWARE_STATUS_MAP.get(int(secondary), "unknown")
+    primary_state = "not present" if _is_missing(primary) else _hw_status_label(int(primary))
+    secondary_state = "not present" if _is_missing(secondary) else _hw_status_label(int(secondary))
     states = [primary_state, secondary_state]
 
-    bad_states = {"down", "error", "overTemp", "noMedia", "unknown", "not present"}
+    bad_states = {"down", "error", "overTemp", "noMedia", "unknown", "not present", "standby cold", "failed"}
     active_count = states.count("active")
     standby_count = states.count("standby")
 
@@ -174,6 +200,115 @@ def check_ha_summary(args):
            f"secondary_state={int(secondary) if not _is_missing(secondary) else 99};;;;"
 
     print(f"{label} - Primary: {primary_state}, Secondary: {secondary_state} | {perf}")
+    sys.exit(exit_code)
+
+
+def _query_pair_state(args, host):
+    """GET cfwHardwareStatusValue for both primary(6)/secondary(7) indices from a specific host,
+    reusing the same SNMP credentials as args. Returns (primary, secondary, rc, error_message)."""
+    host_args = copy.copy(args)
+    host_args.hostname = host
+
+    primary, rc = pysnmp_get(host_args, f"{OIDS['cfwHardwareStatusValue']}.{HW_INDEX_PRIMARY}")
+    if rc != 0:
+        return None, None, rc, primary
+
+    secondary, rc = pysnmp_get(host_args, f"{OIDS['cfwHardwareStatusValue']}.{HW_INDEX_SECONDARY}")
+    if rc != 0:
+        return None, None, rc, secondary
+
+    return primary, secondary, 0, None
+
+
+def _guess_peer_candidates(hostname):
+    """Best-effort peer IP candidates from the +/-2-last-octet convention observed in this
+    environment. Returns [] if hostname isn't a plain IPv4 address (heuristic doesn't apply)."""
+    match = IPV4_PATTERN.match(hostname)
+    if not match:
+        return []
+    octets = [int(o) for o in match.groups()]
+    candidates = []
+    for offset in PEER_IP_OFFSET_CANDIDATES:
+        last = octets[3] + offset
+        if 0 <= last <= 255:
+            candidates.append(".".join(str(o) for o in octets[:3]) + f".{last}")
+    return candidates
+
+
+def _discover_peer(args, local_primary, local_secondary):
+    """Try each IP-heuristic candidate in turn, returning (peer_host, peer_primary, peer_secondary)
+    for the first one that is reachable AND agrees with the local unit's reported state, or None
+    if no candidate could be confirmed."""
+    for candidate in _guess_peer_candidates(args.hostname):
+        peer_primary, peer_secondary, rc, _ = _query_pair_state(args, candidate)
+        if rc != 0 or any(_is_missing(v) for v in (peer_primary, peer_secondary)):
+            continue
+        peer_primary, peer_secondary = int(peer_primary), int(peer_secondary)
+        if peer_primary == local_primary and peer_secondary == local_secondary:
+            return candidate, peer_primary, peer_secondary
+    return None
+
+
+def check_ha_pair(args):
+    """Cross-check HA state by independently querying both paired units' IPs, requiring both to
+    be reachable, agree on the pair's state, and report a failover-safe numeric state (9/10).
+    If --peer-hostname isn't given, the peer is guessed via _discover_peer() and confirmed by a
+    live query before being trusted; if no candidate can be confirmed, exits WARNING instead of
+    guessing blindly."""
+    local_primary, local_secondary, rc, err = _query_pair_state(args, args.hostname)
+    if rc != 0:
+        print(f"CRITICAL - Unit {args.hostname} unreachable via SNMP: {err}")
+        sys.exit(2)
+    if any(_is_missing(v) for v in (local_primary, local_secondary)):
+        print(f"UNKNOWN - Failover is not configured on {args.hostname}")
+        sys.exit(3)
+    local_primary, local_secondary = int(local_primary), int(local_secondary)
+
+    auto_detected = False
+    peer_hostname = args.peer_hostname
+    if peer_hostname:
+        peer_primary, peer_secondary, rc, err = _query_pair_state(args, peer_hostname)
+        if rc != 0:
+            print(f"CRITICAL - Peer unit {peer_hostname} unreachable via SNMP: {err}")
+            sys.exit(2)
+        if any(_is_missing(v) for v in (peer_primary, peer_secondary)):
+            print(f"UNKNOWN - Failover is not configured on peer unit {peer_hostname}")
+            sys.exit(3)
+        peer_primary, peer_secondary = int(peer_primary), int(peer_secondary)
+    else:
+        discovered = _discover_peer(args, local_primary, local_secondary)
+        if discovered is None:
+            candidates = _guess_peer_candidates(args.hostname)
+            tried = f"tried {', '.join(candidates)}" if candidates else \
+                "no candidates - hostname is not a plain IPv4 address"
+            print(
+                f"WARNING - Could not auto-detect an HA peer for {args.hostname} ({tried} via the "
+                "+/-2 last-octet convention); pass --peer-hostname explicitly to enable this check"
+            )
+            sys.exit(1)
+        peer_hostname, peer_primary, peer_secondary = discovered
+        auto_detected = True
+
+    if local_primary != peer_primary or local_secondary != peer_secondary:
+        print(
+            f"CRITICAL - HA pair state mismatch: {args.hostname} reports primary={local_primary}/"
+            f"secondary={local_secondary}, {peer_hostname} reports primary={peer_primary}/"
+            f"secondary={peer_secondary} (units do not see each other consistently)"
+        )
+        sys.exit(2)
+
+    primary_label, primary_safe = PEER_NUMERIC_STATE_MAP.get(local_primary, ("Forming/Unknown", False))
+    secondary_label, secondary_safe = PEER_NUMERIC_STATE_MAP.get(local_secondary, ("Forming/Unknown", False))
+
+    exit_code = 0 if (primary_safe and secondary_safe) else 2
+    status = NAGIOS_STATUS[exit_code]
+    perf = f"primary_state={local_primary};;;; secondary_state={local_secondary};;;;"
+    peer_note = f" (peer {peer_hostname} auto-detected via IP heuristic)" if auto_detected else ""
+
+    print(
+        f"{status} - Both units reachable and agree: Primary: {primary_label} ({local_primary}), "
+        f"Secondary: {secondary_label} ({local_secondary}){peer_note} | {perf}"
+    )
     sys.exit(exit_code)
 
 
@@ -577,6 +712,10 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("-H", "--hostname", required=True, help="Firewall hostname or IP")
+    parser.add_argument("--peer-hostname",
+                        help="Paired unit's hostname or IP for --mode ha_pair. If omitted, the peer is "
+                             "guessed from --hostname via the +/-2 last-octet IPv4 convention and confirmed "
+                             "by a live query; exits WARNING if no candidate can be confirmed.")
     parser.add_argument("-C", "--community", help="SNMPv2c community string")
     parser.add_argument("--user", help="SNMPv3 username")
     parser.add_argument("--seclevel", default="authPriv",
@@ -588,11 +727,15 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
     parser.add_argument("--mode", required=True, metavar="MODE",
-                        choices=["ha_summary", "cpu", "memory", "connections",
+                        choices=["ha_summary", "ha_pair", "cpu", "memory", "connections",
                                  "uptime", "primary_state",
                                  "secondary_state", "sysinfo", "hardware", "interfaces"],
                         help="A keyword which tells the plugin what to do\n"
                              "    ha_summary            (Check the HA failover status of the primary/secondary units)\n"
+                             "    ha_pair               (Cross-check HA state via --hostname and --peer-hostname: both must be\n"
+                             "                           reachable, agree with each other, and report a failover-safe state.\n"
+                             "                           --peer-hostname is optional - if omitted, the peer is guessed via the\n"
+                             "                           +/-2 last-octet IPv4 convention and confirmed by a live query)\n"
                              "    cpu                   (Check the average CPU load of the device)\n"
                              "    memory                (Check the memory pool usage of the device)\n"
                              "    connections           (Check the current in-use connection count)\n"
@@ -619,6 +762,8 @@ def main():
 
     if args.mode == "ha_summary":
         check_ha_summary(args)
+    elif args.mode == "ha_pair":
+        check_ha_pair(args)
     elif args.mode == "cpu":
         check_cpu(args, args.warning if args.warning is not None else 80.0,
                   args.critical if args.critical is not None else 90.0)
