@@ -159,6 +159,11 @@ OIDS = {
     # CISCO-FIREWALL-MIB — Hardware status (indices: 6=primaryUnit, 7=secondaryUnit)
     "cfwHardwareStatusValue":     "1.3.6.1.4.1.9.9.147.1.2.1.1.1.3",
     "cfwHardwareStatusDetail":    "1.3.6.1.4.1.9.9.147.1.2.1.1.1.4",
+    # cfwHardwareInformation (column 2) is self-referential rather than pair-mirrored: on
+    # real devices its text includes "(this device)" only on the row (6=primary/7=secondary)
+    # matching the unit that actually answered the query - used to label which IP is which
+    # role in ha_pair output. Confirmed against the official CISCO-FIREWALL-MIB definition.
+    "cfwHardwareInformation":     "1.3.6.1.4.1.9.9.147.1.2.1.1.1.2",
 
     # CISCO-FIREWALL-MIB cfwConnectionStatValue (Gauge32), indexed by
     # [cfwConnectionStatService=40 (entire firewall), cfwConnectionStatType=6 (currentInUse) / 7 (high)].

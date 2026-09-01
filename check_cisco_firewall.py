@@ -19,7 +19,9 @@
 #                          is omitted, the peer is guessed from --hostname using the +/-2-last-octet IPv4
 #                          convention observed in this environment (e.g. .226/.228) and confirmed by
 #                          querying it; if no candidate can be confirmed, exits WARNING rather than
-#                          guessing blindly - pass --peer-hostname explicitly in that case
+#                          guessing blindly - pass --peer-hostname explicitly in that case. Output
+#                          best-effort labels which IP is Primary/Secondary using cfwHardwareInformation's
+#                          self-referential "(this device)" text, when the platform populates it
 #   cpu                 - average CPU load (5s/1m/5m); --warning/--critical are percent (default 80/90)
 #   memory              - system/data-plane memory pool usage; --warning/--critical are percent (default 80/90)
 #   connections         - current in-use connections; --warning/--critical are connection counts
@@ -249,6 +251,22 @@ def _discover_peer(args, local_primary, local_secondary):
     return None
 
 
+def _determine_unit_role(args, host):
+    """Best-effort: identify whether `host` itself is the primary or secondary unit by checking
+    cfwHardwareInformation (free text) at the primary(6)/secondary(7) instances for the literal
+    "(this device)" marker Cisco includes only on the row matching the unit that actually answered
+    the query - unlike cfwHardwareStatusValue/Detail, this text is not mirrored pair-wide. Returns
+    "primary"/"secondary", or None if undeterminable (OID not populated on this platform, unreachable,
+    or neither instance is self-marked)."""
+    host_args = copy.copy(args)
+    host_args.hostname = host
+    for hw_index, role in ((HW_INDEX_PRIMARY, "primary"), (HW_INDEX_SECONDARY, "secondary")):
+        info, rc = pysnmp_get(host_args, f"{OIDS['cfwHardwareInformation']}.{hw_index}")
+        if rc == 0 and not _is_missing(info) and "this device" in snmp_value_to_str(info).lower():
+            return role
+    return None
+
+
 def check_ha_pair(args):
     """Cross-check HA state by independently querying both paired units' IPs, requiring both to
     be reachable, agree on the pair's state, and report a failover-safe numeric state (9/10).
@@ -305,9 +323,16 @@ def check_ha_pair(args):
     perf = f"primary_state={local_primary};;;; secondary_state={local_secondary};;;;"
     peer_note = f" (peer {peer_hostname} auto-detected via IP heuristic)" if auto_detected else ""
 
+    hostname_role = _determine_unit_role(args, args.hostname)
+    peer_role = _determine_unit_role(args, peer_hostname)
+    primary_ip = args.hostname if hostname_role == "primary" else peer_hostname if peer_role == "primary" else None
+    secondary_ip = args.hostname if hostname_role == "secondary" else peer_hostname if peer_role == "secondary" else None
+    primary_ip_note = f" [{primary_ip}]" if primary_ip else ""
+    secondary_ip_note = f" [{secondary_ip}]" if secondary_ip else ""
+
     print(
-        f"{status} - Both units reachable and agree: Primary: {primary_label} ({local_primary}), "
-        f"Secondary: {secondary_label} ({local_secondary}){peer_note} | {perf}"
+        f"{status} - Both units reachable and agree: Primary{primary_ip_note}: {primary_label} ({local_primary}), "
+        f"Secondary{secondary_ip_note}: {secondary_label} ({local_secondary}){peer_note} | {perf}"
     )
     sys.exit(exit_code)
 
@@ -735,7 +760,9 @@ def main():
                              "    ha_pair               (Cross-check HA state via --hostname and --peer-hostname: both must be\n"
                              "                           reachable, agree with each other, and report a failover-safe state.\n"
                              "                           --peer-hostname is optional - if omitted, the peer is guessed via the\n"
-                             "                           +/-2 last-octet IPv4 convention and confirmed by a live query)\n"
+                             "                           +/-2 last-octet IPv4 convention and confirmed by a live query. Output\n"
+                             "                           best-effort labels which IP is Primary/Secondary when the platform\n"
+                             "                           populates cfwHardwareInformation's self-referential text)\n"
                              "    cpu                   (Check the average CPU load of the device)\n"
                              "    memory                (Check the memory pool usage of the device)\n"
                              "    connections           (Check the current in-use connection count)\n"

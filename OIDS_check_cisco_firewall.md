@@ -67,6 +67,12 @@ If `--peer-hostname` is omitted, the peer is guessed from `--hostname` using the
 
 An auto-detected peer is noted in the output as `(peer <ip> auto-detected via IP heuristic)`.
 
+### Primary/Secondary IP labeling (`_determine_unit_role()`)
+
+Unlike `cfwHardwareStatusValue`/`cfwHardwareStatusDetail`, which are fixed, pair-mirrored entries (identical no matter which paired IP is queried), `cfwHardwareInformation` (column 2 of the same `cfwHardwareStatusTable`, OID `1.3.6.1.4.1.9.9.147.1.2.1.1.1.2`) is self-referential: on real devices its free text includes `(this device)` only on the row (`.6`=primary/`.7`=secondary) matching the unit that actually answered the query.
+
+`_determine_unit_role(args, host)` GETs `cfwHardwareInformation.6` and `.7` from `host` and returns `"primary"`/`"secondary"` if either instance's text contains `"this device"` (case-insensitive), else `None`. `check_ha_pair()` calls this once for `--hostname` and once for the (given or auto-detected) peer, then labels the output as `Primary [<ip>]`/`Secondary [<ip>]`. If the OID isn't populated on a given platform or credentials/timeout fail for these extra GETs, the labels are silently omitted (`None`) rather than guessed — this is purely additive and never affects the exit code.
+
 ## cpu
 Average CPU load (5s/1m/5m), from CISCO-PROCESS-MIB's CPU history table.
 
