@@ -47,6 +47,26 @@ HA state of the primary/secondary hardware units, from `cfwHardwareStatusValue`.
 | Either state in `{backup, busy, other}` | `1` WARNING | — |
 | Otherwise (one `active` + one `standby`) | `0` OK | — |
 
+## ha_pair
+Cross-checks HA state by independently querying `cfwHardwareStatusValue` (same OID/instances as `ha_summary` above) from both `--hostname` and `--peer-hostname`, rather than relying on a single unit's view of its peer.
+
+If `--peer-hostname` is omitted, the peer is guessed from `--hostname` using the environment-observed +/-2-last-octet IPv4 convention (e.g. `.226`/`.228`, `.227`/`.229`) — see `PEER_IP_OFFSET_CANDIDATES`/`_guess_peer_candidates()`/`_discover_peer()` in the script. A guessed candidate is never trusted blindly: it must respond via SNMP and report the same primary/secondary values as `--hostname` before being accepted.
+
+### Result logic (`check_ha_pair()`)
+
+| Condition | Exit code | Summary |
+|---|---|---|
+| `--hostname` unreachable via SNMP | `2` CRITICAL | "Unit `<host>` unreachable via SNMP" |
+| `--hostname` has no primary/secondary instances (failover not configured) | `3` UNKNOWN | "Failover is not configured on `<host>`" |
+| `--peer-hostname` given but unreachable | `2` CRITICAL | "Peer unit `<peer>` unreachable via SNMP" |
+| `--peer-hostname` given but has no primary/secondary instances | `3` UNKNOWN | "Failover is not configured on peer unit `<peer>`" |
+| `--peer-hostname` omitted and no IP-heuristic candidate can be confirmed | `1` WARNING | Lists which candidate(s) were tried (or that `--hostname` isn't a plain IPv4 address) |
+| The two units' primary/secondary values disagree | `2` CRITICAL | "HA pair state mismatch" |
+| Both agree, but either value isn't a failover-safe state (9/10) | `2` CRITICAL | Reflects the reported label (e.g. Standby Cold/Failed) |
+| Both agree and both are failover-safe (9/10) | `0` OK | "Both units reachable and agree" |
+
+An auto-detected peer is noted in the output as `(peer <ip> auto-detected via IP heuristic)`.
+
 ## cpu
 Average CPU load (5s/1m/5m), from CISCO-PROCESS-MIB's CPU history table.
 

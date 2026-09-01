@@ -274,12 +274,13 @@ All SNMP-based checks support both SNMPv2c and SNMPv3 and will automatically fal
 Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status.
 
 ```bash
-./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [-w/--warning <n>] [-c/--critical <n>]
+./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--peer-hostname <host>] [-w/--warning <n>] [-c/--critical <n>]
 ```
 
 | Mode                 | Description                                                              |
 |----------------------|---------------------------------------------------------------------------|
 | `ha_summary`          | HA state of both the primary and secondary units (`cfwHardwareStatusValue`) |
+| `ha_pair`             | Cross-checks HA state by independently querying both `--hostname` and `--peer-hostname`, requiring both reachable, in agreement, and in a failover-safe state (9/10) |
 | `cpu`                 | Average CPU load (5s/1m/5m); `--warning`/`--critical` are percent (default 80/90) |
 | `memory`              | System/data-plane memory pool usage; `--warning`/`--critical` are percent (default 80/90) |
 | `connections`         | Current in-use connection count, with peak count included in verbose output and perfdata; `--warning`/`--critical` are connection counts |
@@ -302,5 +303,7 @@ The `hardware` mode uses `CISCO-ENTITY-FRU-CONTROL-MIB` (fan tray/PSU status is 
 | 12    | Failed           | CRITICAL |
 
 So a healthy pair always shows one unit as Active (9) and the other as Standby Ready (10) — it does not matter whether the Active one is the primary or the secondary unit. These extended values (9-12) are seen on real devices but go beyond the standard `CISCO-FIREWALL-MIB` `HardwareStatus` textual convention (which only defines up to 10).
+
+For `ha_pair`, `--peer-hostname` is optional: if omitted, the peer is guessed from `--hostname` using the environment's observed +/-2-last-octet IPv4 convention (e.g. `.226`/`.228`) and confirmed via a live SNMP query before being trusted; a confirmed auto-detected peer is noted in the output as `(peer <ip> auto-detected via IP heuristic)`. If no candidate can be confirmed (or `--hostname` isn't a plain IPv4 address), the check exits `WARNING` rather than guessing blindly.
 
 Running the script with no arguments prints usage/help and exits `UNKNOWN` instead of argparse's terse error. `--community`/`--user` credentials are required up front (`UNKNOWN` if neither is given). An SNMP timeout (unreachable host) is reported as `UNKNOWN` rather than `CRITICAL`, and any unexpected error or manual interruption (Ctrl+C) is caught and reported as a single-line `UNKNOWN` result instead of a raw Python traceback.
