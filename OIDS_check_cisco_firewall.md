@@ -359,6 +359,7 @@ SSH to the device lands in FXOS on the Secure Firewall 3100 series. For everythi
 | Mode | Native command | Where to run |
 |---|---|---|
 | `ha_summary` / `primary_state` / `secondary_state` | `show failover` or `show failover state` | FTD diagnostic-cli |
+| `ha_pair` | `show failover` (or `show failover state`) run separately on **both** `--hostname` and `--peer-hostname` — confirm both agree on which unit is Active vs Standby Ready and that neither reports Failed/Standby Cold. `show failover history` is useful if a mismatch suggests a recent transition. There's no single native command equivalent to the cross-query the script performs; it must be checked on both units | FTD diagnostic-cli (both units) |
 | `cpu` | `show cpu usage` | FTD diagnostic-cli |
 | `memory` | `show memory` or `show memory detail` | FTD diagnostic-cli |
 | `connections` | `show conn count` | FTD diagnostic-cli |
