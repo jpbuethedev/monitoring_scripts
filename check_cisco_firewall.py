@@ -38,6 +38,7 @@
 
 import argparse
 import copy
+import os
 import re
 import sys
 from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_get, pysnmp_walk_indexed, pysnmp_walk_multi_indexed, snmp_value_to_str
@@ -704,9 +705,11 @@ def check_hardware(args):
     perf = f"components_total={len(components)};;;; components_bad={len(bad)};;;;"
     print(f"{summary} | {perf}")
 
-    table = [f"{'Device Name':<20}{'Device Voltage':>16}{'Device RPM':>12}{'Device Status':>15}"]
-    for name, state_label, _, voltage, rpm in components:
-        table.append(f"{name:<20}{voltage:>16}{rpm:>12}{state_label:>15}")
+    headers = ("Device Name", "Device Voltage", "Device RPM", "Device Status")
+    hw_rows = [(name, voltage, rpm, state_label) for name, state_label, _, voltage, rpm in components]
+    widths = [max(len(header), *(len(row[i]) for row in hw_rows)) for i, header in enumerate(headers)]
+    table = [" | ".join(h.ljust(w) for h, w in zip(headers, widths))]
+    table += [" | ".join(v.ljust(w) for v, w in zip(row, widths)) for row in hw_rows]
     print("\n".join(table))
     sys.exit(exit_code)
 
@@ -827,9 +830,9 @@ def main():
     parser.add_argument("--seclevel", default="authPriv",
                         choices=["noAuthNoPriv", "authNoPriv", "authPriv"])
     parser.add_argument("--auth", default="sha")
-    parser.add_argument("--authpw")
+    parser.add_argument("--authpw", help="SNMPv3 auth password (or set SNMP_AUTHPW env var instead, to avoid exposing it in the process list)")
     parser.add_argument("--priv", default="aes")
-    parser.add_argument("--privpw")
+    parser.add_argument("--privpw", help="SNMPv3 priv password (or set SNMP_PRIVPW env var instead, to avoid exposing it in the process list)")
     parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
     parser.add_argument("--mode", required=True, metavar="MODE",
@@ -864,6 +867,10 @@ def main():
         sys.exit(3)
 
     args = parser.parse_args()
+
+    # prefer explicit CLI flags but fall back to env vars so secrets don't have to appear in the process list
+    args.authpw = args.authpw or os.environ.get("SNMP_AUTHPW")
+    args.privpw = args.privpw or os.environ.get("SNMP_PRIVPW")
 
     if not args.community and not args.user:
         print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
