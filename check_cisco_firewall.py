@@ -105,6 +105,33 @@ def _is_missing(value):
     return "no such" in snmp_value_to_str(value).lower()
 
 
+def _snmp_get_or_exit(args, oid):
+    """pysnmp_get(), printing the Nagios status line and exiting the process on failure."""
+    value, rc = pysnmp_get(args, oid)
+    if rc != 0:
+        print(value)
+        sys.exit(rc)
+    return value
+
+
+def _snmp_walk_or_exit(args, oid):
+    """pysnmp_walk_indexed(), printing the Nagios status line and exiting the process on failure."""
+    result, rc = pysnmp_walk_indexed(args, oid)
+    if rc != 0:
+        print(result)
+        sys.exit(rc)
+    return result
+
+
+def _snmp_walk_multi_or_exit(args, oid):
+    """pysnmp_walk_multi_indexed(), printing the Nagios status line and exiting the process on failure."""
+    result, rc = pysnmp_walk_multi_indexed(args, oid)
+    if rc != 0:
+        print(result)
+        sys.exit(rc)
+    return result
+
+
 def _chunk_evenly(values, n):
     """Split a list into n roughly-equal contiguous chunks (extra items go to the earliest chunks)."""
     if n <= 0:
@@ -169,15 +196,8 @@ def _hw_status_label(numeric):
 def check_ha_summary(args):
     oid = OIDS["cfwHardwareStatusValue"]
 
-    primary, rc = pysnmp_get(args, f"{oid}.{HW_INDEX_PRIMARY}")
-    if rc != 0:
-        print(primary)
-        sys.exit(rc)
-
-    secondary, rc = pysnmp_get(args, f"{oid}.{HW_INDEX_SECONDARY}")
-    if rc != 0:
-        print(secondary)
-        sys.exit(rc)
+    primary = _snmp_get_or_exit(args, f"{oid}.{HW_INDEX_PRIMARY}")
+    secondary = _snmp_get_or_exit(args, f"{oid}.{HW_INDEX_SECONDARY}")
 
     if _is_missing(primary) and _is_missing(secondary):
         print("UNKNOWN - Failover is not configured on this unit (standalone)")
@@ -356,10 +376,7 @@ def check_cpu(args, warning, critical):
 
     averages = {}
     for label, oid in cpu_oids.items():
-        result, rc = pysnmp_walk_indexed(args, oid)
-        if rc != 0:
-            print(result)
-            sys.exit(rc)
+        result = _snmp_walk_or_exit(args, oid)
         if not result:
             print(f"UNKNOWN - No CPU data returned for {label} average")
             sys.exit(3)
@@ -387,32 +404,14 @@ def check_cpu(args, warning, critical):
 def check_memory(args, warning, critical):
     # CISCO-MEMORY-POOL-MIB (single-indexed by pool type) is used on classic ASA;
     # newer ASA/FTD/Secure Firewall platforms only populate CISCO-ENHANCED-MEMPOOL-MIB instead.
-    names, rc = pysnmp_walk_indexed(args, OIDS["ciscoMemPoolName"])
-    if rc != 0:
-        print(names)
-        sys.exit(rc)
-    used, rc = pysnmp_walk_indexed(args, OIDS["ciscoMemPoolUsed"])
-    if rc != 0:
-        print(used)
-        sys.exit(rc)
-    free, rc = pysnmp_walk_indexed(args, OIDS["ciscoMemPoolFree"])
-    if rc != 0:
-        print(free)
-        sys.exit(rc)
+    names = _snmp_walk_or_exit(args, OIDS["ciscoMemPoolName"])
+    used = _snmp_walk_or_exit(args, OIDS["ciscoMemPoolUsed"])
+    free = _snmp_walk_or_exit(args, OIDS["ciscoMemPoolFree"])
 
     if not names:
-        names, rc = pysnmp_walk_multi_indexed(args, OIDS["cempMemPoolName"])
-        if rc != 0:
-            print(names)
-            sys.exit(rc)
-        used, rc = pysnmp_walk_multi_indexed(args, OIDS["cempMemPoolUsed"])
-        if rc != 0:
-            print(used)
-            sys.exit(rc)
-        free, rc = pysnmp_walk_multi_indexed(args, OIDS["cempMemPoolFree"])
-        if rc != 0:
-            print(free)
-            sys.exit(rc)
+        names = _snmp_walk_multi_or_exit(args, OIDS["cempMemPoolName"])
+        used = _snmp_walk_multi_or_exit(args, OIDS["cempMemPoolUsed"])
+        free = _snmp_walk_multi_or_exit(args, OIDS["cempMemPoolFree"])
 
     # Prefer the overall system/data-plane memory pool; fall back to the first pool reported
     preferred = ("dp system", "system memory", "processor")
@@ -455,10 +454,7 @@ def check_memory(args, warning, critical):
 
 
 def check_connections(args, warning, critical):
-    active, rc = pysnmp_get(args, OIDS["connActiveConnections"])
-    if rc != 0:
-        print(active)
-        sys.exit(rc)
+    active = _snmp_get_or_exit(args, OIDS["connActiveConnections"])
     if _is_missing(active):
         print("UNKNOWN - Connection statistics are not available on this device")
         sys.exit(3)
@@ -489,10 +485,7 @@ def check_connections(args, warning, critical):
 
 
 def check_uptime(args, warning, critical):
-    value, rc = pysnmp_get(args, OIDS["sysUpTime"])
-    if rc != 0:
-        print(value)
-        sys.exit(rc)
+    value = _snmp_get_or_exit(args, OIDS["sysUpTime"])
 
     total_seconds = int(value) // 100  # sysUpTime is in hundredths of a second
     days, remainder = divmod(total_seconds, 86400)
@@ -518,15 +511,8 @@ def check_uptime(args, warning, critical):
 
 
 def _check_combined_state(args, hw_index, label):
-    detail, rc = pysnmp_get(args, f"{OIDS['cfwHardwareStatusDetail']}.{hw_index}")
-    if rc != 0:
-        print(detail)
-        sys.exit(rc)
-
-    value, rc = pysnmp_get(args, f"{OIDS['cfwHardwareStatusValue']}.{hw_index}")
-    if rc != 0:
-        print(value)
-        sys.exit(rc)
+    detail = _snmp_get_or_exit(args, f"{OIDS['cfwHardwareStatusDetail']}.{hw_index}")
+    value = _snmp_get_or_exit(args, f"{OIDS['cfwHardwareStatusValue']}.{hw_index}")
 
     text = snmp_value_to_str(detail)
     if (_is_missing(text) or not text.strip()) and _is_missing(value):
@@ -585,15 +571,8 @@ def check_secondary_state(args):
 
 
 def check_sysinfo(args):
-    descr, rc = pysnmp_get(args, OIDS["sysDescr"])
-    if rc != 0:
-        print(descr)
-        sys.exit(rc)
-
-    name, rc = pysnmp_get(args, OIDS["sysName"])
-    if rc != 0:
-        print(name)
-        sys.exit(rc)
+    descr = _snmp_get_or_exit(args, OIDS["sysDescr"])
+    name = _snmp_get_or_exit(args, OIDS["sysName"])
 
     model = _chassis_model_name(args)
     model_note = f", Model: {model}" if model else ""
@@ -621,25 +600,10 @@ def _chassis_model_name(args):
 
 
 def check_hardware(args):
-    classes, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalClass"])
-    if rc != 0:
-        print(classes)
-        sys.exit(rc)
-
-    descrs, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalDescr"])
-    if rc != 0:
-        print(descrs)
-        sys.exit(rc)
-
-    fan_status, rc = pysnmp_walk_indexed(args, OIDS["cefcFanTrayOperStatus"])
-    if rc != 0:
-        print(fan_status)
-        sys.exit(rc)
-
-    psu_status, rc = pysnmp_walk_indexed(args, OIDS["cefcFRUPowerOperStatus"])
-    if rc != 0:
-        print(psu_status)
-        sys.exit(rc)
+    classes = _snmp_walk_or_exit(args, OIDS["entPhysicalClass"])
+    descrs = _snmp_walk_or_exit(args, OIDS["entPhysicalDescr"])
+    fan_status = _snmp_walk_or_exit(args, OIDS["cefcFanTrayOperStatus"])
+    psu_status = _snmp_walk_or_exit(args, OIDS["cefcFRUPowerOperStatus"])
 
     # CISCO-ENTITY-SENSOR-MIB voltage/RPM readings. Best-effort: not every platform
     # populates this MIB, so a failed walk here just means readings show as "-".
@@ -715,25 +679,10 @@ def check_hardware(args):
 
 
 def check_interfaces(args):
-    names, rc = pysnmp_walk_indexed(args, OIDS["ifName"])
-    if rc != 0:
-        print(names)
-        sys.exit(rc)
-
-    admin, rc = pysnmp_walk_indexed(args, OIDS["ifAdminStatus"])
-    if rc != 0:
-        print(admin)
-        sys.exit(rc)
-
-    oper, rc = pysnmp_walk_indexed(args, OIDS["ifOperStatus"])
-    if rc != 0:
-        print(oper)
-        sys.exit(rc)
-
-    aliases, rc = pysnmp_walk_indexed(args, OIDS["ifAlias"])
-    if rc != 0:
-        print(aliases)
-        sys.exit(rc)
+    names = _snmp_walk_or_exit(args, OIDS["ifName"])
+    admin = _snmp_walk_or_exit(args, OIDS["ifAdminStatus"])
+    oper = _snmp_walk_or_exit(args, OIDS["ifOperStatus"])
+    aliases = _snmp_walk_or_exit(args, OIDS["ifAlias"])
 
     # Best-effort: speed/error/discard counters are purely informational and never fail the check
     speeds, rc_extra = pysnmp_walk_indexed(args, OIDS["ifHighSpeed"])

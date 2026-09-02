@@ -316,6 +316,18 @@ Used only to compute human-readable voltage/RPM values for display (not part of 
 
 Note: some units (e.g. a secondary logical FTD instance sharing chassis with another instance) never report any `entPhysicalClass` fan/PSU rows at all — confirmed live on 10.56.1.227/.229. That's expected on those units, not a fault, so the script exits OK with no fan/PSU components rather than UNKNOWN.
 
+### Table output
+
+Below the summary/perfdata line, the check prints a table of every component:
+
+```
+Device Name           | Device Voltage | Device RPM  | Device Status
+Fan Tray 1            | -              | 16440/16620 | up
+Power Supply Module 1 | 236.5V         | -           | on
+```
+
+Columns are both `ljust`-padded *and* `|`-delimited, so the table stays aligned in a terminal/CLI while remaining unambiguous even if a frontend (e.g. Thruk) collapses repeated whitespace in the plugin's long output.
+
 ## interfaces
 Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces excluded), plus informational link speed and error/discard counters.
 
@@ -353,15 +365,19 @@ Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces exclude
 
 Only `ifAdminStatus`/`ifOperStatus` values `1`/`2` are treated specially by this check (see below); other values are simply reported as "UP" (i.e. not flagged down) since they don't represent an admin-up-but-operationally-failed interface.
 
-### Link speed and error/discard counters
+### Table output
 
-Each monitored interface's output line is followed by `ifHighSpeed` (Mbps, omitted if `0`/unavailable) and the four `ifIn/OutErrors`/`ifIn/OutDiscards` counters, e.g.:
+Below the summary/perfdata line, the check prints a table, one row per monitored interface, sorted with DOWN interfaces first (a stable sort, so original `ifIndex` order is preserved within each group):
 
 ```
-GigabitEthernet0/0 (WAN): UP, 1000Mbps, errors(in/out)=0/0, discards(in/out)=3/0
+Interface           | Alias | Status | Speed    | Errors(in/out) | Discards(in/out)
+GigabitEthernet0/1  | WAN   | DOWN   | -        | -               | -
+GigabitEthernet0/0  | LAN   | UP     | 1000Mbps | -               | 3/0
 ```
 
-These four counters are also summed across all monitored interfaces and reported as `errors_total`/`discards_total` in the perfdata. All of this is walked best-effort — if any of these OIDs aren't populated on a platform, the walk silently degrades to an empty set rather than failing the check. **This data is purely informational: it never affects the UP/DOWN determination or the overall exit code.**
+`Speed` comes from `ifHighSpeed` (Mbps, `-` if `0`/unavailable). `Errors(in/out)`/`Discards(in/out)` come from `ifIn/OutErrors`/`ifIn/OutDiscards`, shown as `-` when both directions are `0` to reduce visual noise — the raw counters are still summed across all monitored interfaces regardless of display and reported as `errors_total`/`discards_total` in the perfdata. All of this is walked best-effort — if any of these OIDs aren't populated on a platform, the walk silently degrades to an empty set rather than failing the check. **This data is purely informational: it never affects the UP/DOWN determination or the overall exit code.**
+
+Columns are both `ljust`-padded *and* `|`-delimited, so the table stays aligned in a terminal/CLI while remaining unambiguous even if a frontend (e.g. Thruk) collapses repeated whitespace in the plugin's long output.
 
 ### Excluded pseudo-interfaces
 
