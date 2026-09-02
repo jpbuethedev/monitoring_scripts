@@ -792,9 +792,8 @@ def check_interfaces(args):
     print(f"{summary} | {perf}")
 
     headers = ("Interface", "Alias", "Status", "Speed", "Errors(in/out)", "Discards(in/out)")
-    widths = [max(len(header), *(len(row[i]) for row in rows)) + 2 for i, header in enumerate(headers)]
-    table = ["".join(h.ljust(w) for h, w in zip(headers, widths))]
-    table += ["".join(v.ljust(w) for v, w in zip(row, widths)) for row in rows]
+    table = [" | ".join(headers)]
+    table += [" | ".join(row) for row in rows]
     print("\n".join(table))
     sys.exit(exit_code)
 
