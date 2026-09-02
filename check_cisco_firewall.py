@@ -201,7 +201,10 @@ def check_ha_summary(args):
     perf = f"primary_state={int(primary) if not _is_missing(primary) else 99};;;; " \
            f"secondary_state={int(secondary) if not _is_missing(secondary) else 99};;;;"
 
-    print(f"{label} - Primary: {primary_state}, Secondary: {secondary_state} | {perf}")
+    queried_role = _determine_unit_role(args, args.hostname)
+    role_note = f" [queried unit is {queried_role}]" if queried_role else ""
+
+    print(f"{label} - Primary: {primary_state}, Secondary: {secondary_state}{role_note} | {perf}")
     sys.exit(exit_code)
 
 
@@ -548,7 +551,10 @@ def _check_combined_state(args, hw_index, label):
     # hw_index (6=primary, 7=secondary) is a fixed configured role shared by the whole HA pair,
     # so querying either paired unit's IP returns identical output - the label makes that explicit
     # instead of implying "local"/"peer" relative to the queried hostname.
-    print(f"{status} - {label}: {role}, State: {state_label} ({numeric_str}) | state={numeric_str if numeric is not None else ''};;;;")
+    queried_role = _determine_unit_role(args, args.hostname)
+    role_note = f" [queried unit is {queried_role}]" if queried_role else ""
+
+    print(f"{status} - {label}: {role}, State: {state_label} ({numeric_str}){role_note} | state={numeric_str if numeric is not None else ''};;;;")
     sys.exit(exit_code)
 
 
