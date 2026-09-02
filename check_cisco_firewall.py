@@ -201,8 +201,11 @@ def check_ha_summary(args):
     perf = f"primary_state={int(primary) if not _is_missing(primary) else 99};;;; " \
            f"secondary_state={int(secondary) if not _is_missing(secondary) else 99};;;;"
 
+    # both slots' states are already known from this one query, so the queried IP's own
+    # active/standby status can be read off directly once its slot is identified
     queried_role = _determine_unit_role(args, args.hostname)
-    role_note = f" [queried unit is {queried_role}]" if queried_role else ""
+    queried_state = primary_state if queried_role == "primary" else secondary_state if queried_role == "secondary" else None
+    role_note = f" [{args.hostname} = {queried_role} unit, currently {queried_state}]" if queried_role else ""
 
     print(f"{label} - Primary: {primary_state}, Secondary: {secondary_state}{role_note} | {perf}")
     sys.exit(exit_code)
@@ -551,8 +554,19 @@ def _check_combined_state(args, hw_index, label):
     # hw_index (6=primary, 7=secondary) is a fixed configured role shared by the whole HA pair,
     # so querying either paired unit's IP returns identical output - the label makes that explicit
     # instead of implying "local"/"peer" relative to the queried hostname.
+    hw_role = "primary" if hw_index == HW_INDEX_PRIMARY else "secondary"
     queried_role = _determine_unit_role(args, args.hostname)
-    role_note = f" [queried unit is {queried_role}]" if queried_role else ""
+    if queried_role and role in ("Active unit", "Standby unit"):
+        if queried_role == hw_role:
+            role_note = f" [{args.hostname} = {queried_role} unit, currently {role}]"
+        else:
+            # this hw_index's slot isn't the queried IP's own slot, so flip to the queried IP's
+            # actual state (a healthy pair always has exactly one active and one standby unit)
+            queried_state = "Standby unit" if role == "Active unit" else "Active unit"
+            role_note = (f" [{args.hostname} = {queried_role} unit, currently {queried_state}; "
+                         f"this result reflects the {hw_role}/peer unit]")
+    else:
+        role_note = f" [queried unit is {queried_role}]" if queried_role else ""
 
     print(f"{status} - {label}: {role}, State: {state_label} ({numeric_str}){role_note} | state={numeric_str if numeric is not None else ''};;;;")
     sys.exit(exit_code)
