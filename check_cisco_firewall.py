@@ -32,7 +32,9 @@
 #                          same result regardless of which paired unit's IP is queried
 #   sysinfo             - hardware description, hostname and chassis model (sysDescr, sysName, entPhysicalModelName)
 #   hardware            - fan tray / power supply operational status (cefcFanTrayOperStatus, cefcFRUPowerOperStatus)
-#   interfaces          - admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces (ifName, ifAdminStatus, ifOperStatus)
+#   interfaces          - admin/oper status, link speed and error/discard counters of all real
+#                          interfaces, excluding ASA-internal pseudo-interfaces (ifName, ifAdminStatus,
+#                          ifOperStatus, ifHighSpeed, ifIn/OutErrors, ifIn/OutDiscards)
 
 import argparse
 import copy
@@ -730,9 +732,27 @@ def check_interfaces(args):
         print(aliases)
         sys.exit(rc)
 
+    # Best-effort: speed/error/discard counters are purely informational and never fail the check
+    speeds, rc_extra = pysnmp_walk_indexed(args, OIDS["ifHighSpeed"])
+    if rc_extra != 0:
+        speeds = {}
+    in_errors, rc_extra = pysnmp_walk_indexed(args, OIDS["ifInErrors"])
+    if rc_extra != 0:
+        in_errors = {}
+    out_errors, rc_extra = pysnmp_walk_indexed(args, OIDS["ifOutErrors"])
+    if rc_extra != 0:
+        out_errors = {}
+    in_discards, rc_extra = pysnmp_walk_indexed(args, OIDS["ifInDiscards"])
+    if rc_extra != 0:
+        in_discards = {}
+    out_discards, rc_extra = pysnmp_walk_indexed(args, OIDS["ifOutDiscards"])
+    if rc_extra != 0:
+        out_discards = {}
+
     down = []
     lines = []  # per-interface "name: UP/DOWN" detail lines, in index order
     monitored = 0
+    total_errors = total_discards = 0
     for idx in sorted(names):
         name = snmp_value_to_str(names[idx])
         if any(p in name.lower() for p in NOISE_IFNAME_PATTERNS):
@@ -742,11 +762,21 @@ def check_interfaces(args):
         oper_status = int(oper.get(idx, 2))
         alias = snmp_value_to_str(aliases.get(idx, "")).strip()
         label = f"{name} ({alias})" if alias else name
+
+        speed = int(speeds[idx]) if idx in speeds else None
+        in_err, out_err = int(in_errors.get(idx, 0)), int(out_errors.get(idx, 0))
+        in_disc, out_disc = int(in_discards.get(idx, 0)), int(out_discards.get(idx, 0))
+        total_errors += in_err + out_err
+        total_discards += in_disc + out_disc
+
+        speed_note = f", {speed}Mbps" if speed else ""
+        counters_note = f", errors(in/out)={in_err}/{out_err}, discards(in/out)={in_disc}/{out_disc}"
+
         if admin_status == 1 and oper_status != 1:
             down.append(label)
-            lines.append(f"{label}: DOWN")
+            lines.append(f"{label}: DOWN{speed_note}{counters_note}")
         else:
-            lines.append(f"{label}: UP")
+            lines.append(f"{label}: UP{speed_note}{counters_note}")
 
     if monitored == 0:
         print("UNKNOWN - No interfaces found to monitor")
@@ -758,7 +788,8 @@ def check_interfaces(args):
     summary = f"{status} - All {monitored} interfaces are up" if not down \
         else f"{status} - {len(down)} of {monitored} down: {', '.join(down)}"
 
-    perf = f"interfaces_total={monitored};;;; interfaces_down={len(down)};;;;"
+    perf = (f"interfaces_total={monitored};;;; interfaces_down={len(down)};;;; "
+            f"errors_total={total_errors};;;; discards_total={total_discards};;;;")
     print(f"{summary} | {perf}")
     print("\n".join(lines))
     sys.exit(exit_code)
@@ -813,7 +844,8 @@ def main():
                              "    secondary_state       (Check the combined text role and numeric HA state of the secondary unit - same result on either paired IP)\n"
                              "    sysinfo               (Report the hardware description, hostname and chassis model)\n"
                              "    hardware              (Check the fan tray / power supply operational status)\n"
-                             "    interfaces            (Check the admin/oper status of the monitored named interfaces)")
+                             "    interfaces            (Check the admin/oper status of the monitored named interfaces; also\n"
+                             "                           reports link speed and error/discard counters, informational only)")
     parser.add_argument("-w", "--warning", type=float,
                         help="Warning threshold (percent for cpu/memory, connection count for connections, seconds for uptime)")
     parser.add_argument("-c", "--critical", type=float,

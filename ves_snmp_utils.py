@@ -73,6 +73,10 @@ OIDS = {
     "ifDescr":                "1.3.6.1.2.1.2.2.1.2",
     "ifAdminStatus":          "1.3.6.1.2.1.2.2.1.7",
     "ifOperStatus":           "1.3.6.1.2.1.2.2.1.8",
+    "ifInDiscards":           "1.3.6.1.2.1.2.2.1.13",
+    "ifInErrors":             "1.3.6.1.2.1.2.2.1.14",
+    "ifOutDiscards":          "1.3.6.1.2.1.2.2.1.19",
+    "ifOutErrors":            "1.3.6.1.2.1.2.2.1.20",
 
     # MIB-II ARP (ipNetToMediaTable)
     "arpIfIndex":             "1.3.6.1.2.1.4.22.1.1",
@@ -155,6 +159,7 @@ OIDS = {
     # IF-MIB (extended)
     "ifName":                     "1.3.6.1.2.1.31.1.1.1.1",
     "ifAlias":                    "1.3.6.1.2.1.31.1.1.1.18",
+    "ifHighSpeed":                "1.3.6.1.2.1.31.1.1.1.15",
 
     # CISCO-FIREWALL-MIB — Hardware status (indices: 6=primaryUnit, 7=secondaryUnit)
     "cfwHardwareStatusValue":     "1.3.6.1.4.1.9.9.147.1.2.1.1.1.3",
