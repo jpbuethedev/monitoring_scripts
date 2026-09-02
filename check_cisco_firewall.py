@@ -774,8 +774,10 @@ def check_interfaces(args):
         else:
             status_label = "UP"
 
+        errors_str = f"{in_err}/{out_err}" if (in_err or out_err) else "-"
+        discards_str = f"{in_disc}/{out_disc}" if (in_disc or out_disc) else "-"
         rows.append((name, alias, status_label, f"{speed}Mbps" if speed else "-",
-                     f"{in_err}/{out_err}", f"{in_disc}/{out_disc}"))
+                     errors_str, discards_str))
 
     if monitored == 0:
         print("UNKNOWN - No interfaces found to monitor")
@@ -791,9 +793,12 @@ def check_interfaces(args):
             f"errors_total={total_errors};;;; discards_total={total_discards};;;;")
     print(f"{summary} | {perf}")
 
+    rows.sort(key=lambda row: row[2] != "DOWN")  # DOWN interfaces surface at the top of the table
+
     headers = ("Interface", "Alias", "Status", "Speed", "Errors(in/out)", "Discards(in/out)")
-    table = [" | ".join(headers)]
-    table += [" | ".join(row) for row in rows]
+    widths = [max(len(header), *(len(row[i]) for row in rows)) for i, header in enumerate(headers)]
+    table = [" | ".join(h.ljust(w) for h, w in zip(headers, widths))]
+    table += [" | ".join(v.ljust(w) for v, w in zip(row, widths)) for row in rows]
     print("\n".join(table))
     sys.exit(exit_code)
 
