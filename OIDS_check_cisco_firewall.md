@@ -315,7 +315,7 @@ Used only to compute human-readable voltage/RPM values for display (not part of 
 Note: some units (e.g. a secondary logical FTD instance sharing chassis with another instance) never report any `entPhysicalClass` fan/PSU rows at all — confirmed live on 10.56.1.227/.229. That's expected on those units, not a fault, so the script exits OK with no fan/PSU components rather than UNKNOWN.
 
 ## interfaces
-Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces excluded).
+Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces excluded), plus informational link speed and error/discard counters.
 
 | OID name | OID | Table / index |
 |---|---|---|
@@ -323,6 +323,11 @@ Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces exclude
 | `ifAdminStatus` | 1.3.6.1.2.1.2.2.1.7 | `ifTable`, indexed by `ifIndex` |
 | `ifOperStatus` | 1.3.6.1.2.1.2.2.1.8 | `ifTable`, indexed by `ifIndex` |
 | `ifAlias` | 1.3.6.1.2.1.31.1.1.1.18 | `ifXTable`, indexed by `ifIndex` |
+| `ifHighSpeed` | 1.3.6.1.2.1.31.1.1.1.15 | `ifXTable`, indexed by `ifIndex` (Mbps) |
+| `ifInErrors` | 1.3.6.1.2.1.2.2.1.14 | `ifTable`, indexed by `ifIndex` |
+| `ifOutErrors` | 1.3.6.1.2.1.2.2.1.20 | `ifTable`, indexed by `ifIndex` |
+| `ifInDiscards` | 1.3.6.1.2.1.2.2.1.13 | `ifTable`, indexed by `ifIndex` |
+| `ifOutDiscards` | 1.3.6.1.2.1.2.2.1.19 | `ifTable`, indexed by `ifIndex` |
 
 ### ifAdminStatus meanings (MIB-II `IF-MIB`)
 
@@ -346,6 +351,16 @@ Admin/oper status of all real interfaces (ASA-internal pseudo-interfaces exclude
 
 Only `ifAdminStatus`/`ifOperStatus` values `1`/`2` are treated specially by this check (see below); other values are simply reported as "UP" (i.e. not flagged down) since they don't represent an admin-up-but-operationally-failed interface.
 
+### Link speed and error/discard counters
+
+Each monitored interface's output line is followed by `ifHighSpeed` (Mbps, omitted if `0`/unavailable) and the four `ifIn/OutErrors`/`ifIn/OutDiscards` counters, e.g.:
+
+```
+GigabitEthernet0/0 (WAN): UP, 1000Mbps, errors(in/out)=0/0, discards(in/out)=3/0
+```
+
+These four counters are also summed across all monitored interfaces and reported as `errors_total`/`discards_total` in the perfdata. All of this is walked best-effort — if any of these OIDs aren't populated on a platform, the walk silently degrades to an empty set rather than failing the check. **This data is purely informational: it never affects the UP/DOWN determination or the overall exit code.**
+
 ### Excluded pseudo-interfaces
 
 Any `ifName` containing one of these substrings (case-insensitive) is skipped entirely — not reported, not counted:
@@ -366,6 +381,8 @@ These are ASA/FTD-internal pseudo-interfaces present on every unit regardless of
 | One or more interfaces DOWN | `2` CRITICAL |
 | All monitored interfaces UP | `0` OK |
 | No interfaces left after excluding pseudo-interfaces | `3` UNKNOWN |
+
+Perfdata: `interfaces_total`, `interfaces_down`, `errors_total`, `discards_total` (the latter two are informational and don't affect the exit code above).
 
 ## Verifying against native Cisco commands
 
