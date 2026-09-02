@@ -237,6 +237,8 @@ Hardware description, hostname and chassis model — purely informational, no th
 
 Always exits `0` OK if `sysDescr`/`sysName` are retrieved successfully; any SNMP GET failure on those exits with that error's own code (typically `3` UNKNOWN). The chassis model (`_chassis_model_name()`) is best-effort and never affects the exit code: it walks `entPhysicalClass`/`entPhysicalModelName`, takes the first entry where the class is chassis (`3`), and is silently omitted from the output if either walk fails or no chassis entry with a populated model name is found.
 
+Note: some units (e.g. a secondary logical FTD instance sharing chassis with another instance) never report any `entPhysicalClass` rows at all, including the chassis entry — confirmed live on 10.56.1.227/.229. That's the same platform behavior noted under `hardware` below; the model is simply omitted on those units rather than shown as an error.
+
 ## hardware
 Fan tray / power supply operational status, plus best-effort voltage/RPM sensor readings.
 
