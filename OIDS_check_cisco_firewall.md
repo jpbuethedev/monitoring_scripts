@@ -47,6 +47,8 @@ HA state of the primary/secondary hardware units, from `cfwHardwareStatusValue`.
 | Either state in `{backup, busy, other}` | `1` WARNING | — |
 | Otherwise (one `active` + one `standby`) | `0` OK | — |
 
+The output additionally best-effort annotates the queried unit's own slot and live status, e.g. `[10.56.1.226 = primary unit, currently active]`, using `_determine_unit_role()` (see [Primary/Secondary IP labeling](#primarysecondary-ip-labeling-_determine_unit_role) below) — omitted if the platform doesn't populate `cfwHardwareInformation`.
+
 ## ha_pair
 Cross-checks HA state by independently querying `cfwHardwareStatusValue` (same OID/instances as `ha_summary` above) from both `--hostname` and `--peer-hostname`, rather than relying on a single unit's view of its peer.
 
@@ -211,17 +213,29 @@ This is a platform-specific extension beyond the official CISCO-FIREWALL-MIB `Ha
 
 The mode's final exit code is `max(role_exit, state_exit)` from the two tables above — either the text role or the numeric state can independently push the result to WARNING/CRITICAL/UNKNOWN.
 
+### Queried-unit annotation
+
+Both modes also best-effort annotate the queried IP's own active/standby status via `_determine_unit_role()` (same helper `ha_pair` uses — see [Primary/Secondary IP labeling](#primarysecondary-ip-labeling-_determine_unit_role) above):
+
+| Condition | Note appended |
+|---|---|
+| Queried IP's slot (primary/secondary) matches this mode's fixed `hw_index` | `[<ip> = <role> unit, currently <role text>]` — the printed role text describes the queried IP directly |
+| Queried IP's slot does *not* match this mode's fixed `hw_index` | `[<ip> = <role> unit, currently <flipped role text>; this result reflects the <primary/secondary>/peer unit]` — the printed role text describes the peer, so it's flipped (Active↔Standby) to also state the queried IP's own status |
+| `_determine_unit_role()` can't determine a role, or the role text isn't `Active unit`/`Standby unit` | No note appended |
+
 ## sysinfo
-Hardware description and hostname — purely informational, no thresholds or status enum.
+Hardware description, hostname and chassis model — purely informational, no thresholds or status enum.
 
 | OID name | OID | Table / index |
 |---|---|---|
 | `sysDescr` | 1.3.6.1.2.1.1.1.0 | Scalar (`.0` instance) |
 | `sysName` | 1.3.6.1.2.1.1.5.0 | Scalar (`.0` instance) |
+| `entPhysicalClass` | 1.3.6.1.2.1.47.1.1.1.1.5 | `entPhysicalTable`, indexed by `entPhysicalIndex` — used to find the chassis entry (class `3`, see [entPhysicalClass meanings](#entphysicalclass-meanings-used-by-this-check)) |
+| `entPhysicalModelName` | 1.3.6.1.2.1.47.1.1.1.1.13 | Same table/index |
 
 ### Result logic (`check_sysinfo()`)
 
-Always exits `0` OK if both scalars are retrieved successfully; any SNMP GET failure exits with that error's own code (typically `3` UNKNOWN).
+Always exits `0` OK if `sysDescr`/`sysName` are retrieved successfully; any SNMP GET failure on those exits with that error's own code (typically `3` UNKNOWN). The chassis model (`_chassis_model_name()`) is best-effort and never affects the exit code: it walks `entPhysicalClass`/`entPhysicalModelName`, takes the first entry where the class is chassis (`3`), and is silently omitted from the output if either walk fails or no chassis entry with a populated model name is found.
 
 ## hardware
 Fan tray / power supply operational status, plus best-effort voltage/RPM sensor readings.
@@ -240,6 +254,7 @@ Fan tray / power supply operational status, plus best-effort voltage/RPM sensor 
 
 | Value | Meaning |
 |---|---|
+| `3` | `chassis` — the chassis entry, used by `sysinfo` to look up `entPhysicalModelName` |
 | `6` | `powerSupply` — a power supply unit entry |
 | `7` | `fan` — a fan tray entry |
 | *(other ENTITY-MIB values exist)* | Ignored by this check |

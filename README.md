@@ -287,7 +287,7 @@ Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failov
 | `uptime`              | Time since last reboot (`sysUpTime`); `--warning`/`--critical` are minimum seconds |
 | `primary_state`       | Combined text role and numeric HA state of the primary unit (`cfwHardwareStatusDetail`/`cfwHardwareStatusValue` index 6) - same result regardless of which paired unit's IP is queried |
 | `secondary_state`     | Combined text role and numeric HA state of the secondary unit (`cfwHardwareStatusDetail`/`cfwHardwareStatusValue` index 7) - same result regardless of which paired unit's IP is queried |
-| `sysinfo`             | Hardware description and hostname (`sysDescr`, `sysName`) |
+| `sysinfo`             | Hardware description, hostname and chassis model (`sysDescr`, `sysName`, `entPhysicalModelName`) |
 | `hardware`            | Fan tray / power supply operational status |
 | `interfaces`          | Admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces |
 
@@ -303,6 +303,8 @@ The `hardware` mode uses `CISCO-ENTITY-FRU-CONTROL-MIB` (fan tray/PSU status is 
 | 12    | Failed           | CRITICAL |
 
 So a healthy pair always shows one unit as Active (9) and the other as Standby Ready (10) — it does not matter whether the Active one is the primary or the secondary unit. These extended values (9-12) are seen on real devices but go beyond the standard `CISCO-FIREWALL-MIB` `HardwareStatus` textual convention (which only defines up to 10).
+
+`ha_summary`, `primary_state`, and `secondary_state` also best-effort annotate the queried unit's own slot and live status, e.g. `[10.56.1.226 = primary unit, currently active]`. For `primary_state`/`secondary_state`, if the fixed role being reported (primary/secondary) doesn't match the queried IP's own role, the note is flipped to describe the queried IP's actual status instead, e.g. `[10.56.1.226 = primary unit, currently active; this result reflects the secondary/peer unit]`. This reuses the same `_determine_unit_role()` helper as `ha_pair` (below) and is simply omitted if the platform doesn't populate the underlying OID.
 
 For `ha_pair`, `--peer-hostname` is optional: if omitted, the peer is guessed from `--hostname` using the environment's observed +/-2-last-octet IPv4 convention (e.g. `.226`/`.228`) and confirmed via a live SNMP query before being trusted; a confirmed auto-detected peer is noted in the output as `(peer <ip> auto-detected via IP heuristic)`. If no candidate can be confirmed (or `--hostname` isn't a plain IPv4 address), the check exits `WARNING` rather than guessing blindly.
 
