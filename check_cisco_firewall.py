@@ -750,7 +750,7 @@ def check_interfaces(args):
         out_discards = {}
 
     down = []
-    lines = []  # per-interface "name: UP/DOWN" detail lines, in index order
+    rows = []  # (name, alias, status, speed, errors, discards), in index order
     monitored = 0
     total_errors = total_discards = 0
     for idx in sorted(names):
@@ -760,8 +760,7 @@ def check_interfaces(args):
         monitored += 1
         admin_status = int(admin.get(idx, 2))
         oper_status = int(oper.get(idx, 2))
-        alias = snmp_value_to_str(aliases.get(idx, "")).strip()
-        label = f"{name} ({alias})" if alias else name
+        alias = snmp_value_to_str(aliases.get(idx, "")).strip() or "-"
 
         speed = int(speeds[idx]) if idx in speeds else None
         in_err, out_err = int(in_errors.get(idx, 0)), int(out_errors.get(idx, 0))
@@ -769,14 +768,14 @@ def check_interfaces(args):
         total_errors += in_err + out_err
         total_discards += in_disc + out_disc
 
-        speed_note = f", {speed}Mbps" if speed else ""
-        counters_note = f", errors(in/out)={in_err}/{out_err}, discards(in/out)={in_disc}/{out_disc}"
-
         if admin_status == 1 and oper_status != 1:
-            down.append(label)
-            lines.append(f"{label}: DOWN{speed_note}{counters_note}")
+            down.append(f"{name} ({alias})" if alias != "-" else name)
+            status_label = "DOWN"
         else:
-            lines.append(f"{label}: UP{speed_note}{counters_note}")
+            status_label = "UP"
+
+        rows.append((name, alias, status_label, f"{speed}Mbps" if speed else "-",
+                     f"{in_err}/{out_err}", f"{in_disc}/{out_disc}"))
 
     if monitored == 0:
         print("UNKNOWN - No interfaces found to monitor")
@@ -791,7 +790,12 @@ def check_interfaces(args):
     perf = (f"interfaces_total={monitored};;;; interfaces_down={len(down)};;;; "
             f"errors_total={total_errors};;;; discards_total={total_discards};;;;")
     print(f"{summary} | {perf}")
-    print("\n".join(lines))
+
+    headers = ("Interface", "Alias", "Status", "Speed", "Errors(in/out)", "Discards(in/out)")
+    widths = [max(len(header), *(len(row[i]) for row in rows)) + 2 for i, header in enumerate(headers)]
+    table = ["".join(h.ljust(w) for h, w in zip(headers, widths))]
+    table += ["".join(v.ljust(w) for v, w in zip(row, widths)) for row in rows]
+    print("\n".join(table))
     sys.exit(exit_code)
 
 
