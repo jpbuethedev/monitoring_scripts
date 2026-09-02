@@ -30,7 +30,7 @@
 #                          same result regardless of which paired unit's IP is queried
 #   secondary_state      - combined text role and numeric HA state of the secondary unit (cfwHardwareStatusDetail/Value index 7);
 #                          same result regardless of which paired unit's IP is queried
-#   sysinfo             - hardware description and hostname (sysDescr, sysName)
+#   sysinfo             - hardware description, hostname and chassis model (sysDescr, sysName, entPhysicalModelName)
 #   hardware            - fan tray / power supply operational status (cefcFanTrayOperStatus, cefcFRUPowerOperStatus)
 #   interfaces          - admin/oper status of all real interfaces, excluding ASA-internal pseudo-interfaces (ifName, ifAdminStatus, ifOperStatus)
 
@@ -67,9 +67,10 @@ PEER_NUMERIC_STATE_MAP = {
     12: ("Failed", False),
 }
 
-# ENTITY-MIB PhysicalClass values used to identify fan / power supply entries
+# ENTITY-MIB PhysicalClass values used to identify fan / power supply / chassis entries
 # (more reliable than matching keywords in entPhysicalDescr, which is inconsistent/truncated
 # across platforms, e.g. Secure Firewall 3100 PSU descr doesn't contain "psu"/"power supply")
+ENT_PHYSICAL_CLASS_CHASSIS = 3
 ENT_PHYSICAL_CLASS_POWER_SUPPLY = 6
 ENT_PHYSICAL_CLASS_FAN = 7
 
@@ -591,8 +592,29 @@ def check_sysinfo(args):
         print(name)
         sys.exit(rc)
 
-    print(f"OK - Hostname: {snmp_value_to_str(name)}, Description: {snmp_value_to_str(descr)}")
+    model = _chassis_model_name(args)
+    model_note = f", Model: {model}" if model else ""
+
+    print(f"OK - Hostname: {snmp_value_to_str(name)}, Description: {snmp_value_to_str(descr)}{model_note}")
     sys.exit(0)
+
+
+def _chassis_model_name(args):
+    """Best-effort entPhysicalModelName of the chassis entry (entPhysicalClass=chassis).
+    Returns None if the walk fails or no chassis entry is found - not every platform populates
+    this MIB, so callers should degrade gracefully rather than treat this as an error."""
+    classes, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalClass"])
+    if rc != 0:
+        return None
+    models, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalModelName"])
+    if rc != 0:
+        return None
+    for idx, value in classes.items():
+        if int(value) == ENT_PHYSICAL_CLASS_CHASSIS and idx in models:
+            model = snmp_value_to_str(models[idx]).strip()
+            if model and not _is_missing(model):
+                return model
+    return None
 
 
 def check_hardware(args):
@@ -789,7 +811,7 @@ def main():
                              "    uptime                (Check the uptime since the last reboot)\n"
                              "    primary_state         (Check the combined text role and numeric HA state of the primary unit - same result on either paired IP)\n"
                              "    secondary_state       (Check the combined text role and numeric HA state of the secondary unit - same result on either paired IP)\n"
-                             "    sysinfo               (Report the hardware description and hostname)\n"
+                             "    sysinfo               (Report the hardware description, hostname and chassis model)\n"
                              "    hardware              (Check the fan tray / power supply operational status)\n"
                              "    interfaces            (Check the admin/oper status of the monitored named interfaces)")
     parser.add_argument("-w", "--warning", type=float,
