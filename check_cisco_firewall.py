@@ -145,14 +145,16 @@ def _render_table(args, headers, rows, bad_row_mask=None):
         table += [" | ".join(v.ljust(w) for v, w in zip(row, widths)) for row in rows]
         return "\n".join(table)
 
+    # No embedded newlines: Thruk's long-output handling breaks on "\n" (e.g. inserting <br>
+    # between lines), which corrupts raw multi-line HTML like a <table> and leaves a blank gap.
     bad_row_mask = bad_row_mask or [False] * len(rows)
-    lines = ['<table border="1" cellpadding="3" cellspacing="0">',
+    parts = ['<table border="1" cellpadding="3" cellspacing="0">',
              "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"]
     for row, bad in zip(rows, bad_row_mask):
         style = ' style="background-color:#f8d7da"' if bad else ""
-        lines.append(f"<tr{style}>" + "".join(f"<td>{html.escape(v)}</td>" for v in row) + "</tr>")
-    lines.append("</table>")
-    return "\n".join(lines)
+        parts.append(f"<tr{style}>" + "".join(f"<td>{html.escape(v)}</td>" for v in row) + "</tr>")
+    parts.append("</table>")
+    return "".join(parts)
 
 
 def _chunk_evenly(values, n):
