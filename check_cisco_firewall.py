@@ -6,7 +6,7 @@
 # Usage: check_cisco_firewall.py -H/--hostname <network-component>
 #            ( -C/--community <snmp-community> | --user <snmpv3-user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]
 #              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
-#            [ -t/--timeout <seconds> ] [ -v/--verbose ]
+#            [ -t/--timeout <seconds> ] [ -v/--verbose ] [ --html-table ]
 #            --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
 #            [ --peer-hostname <network-component> ]
 #            [ -w/--warning <threshold> ] [ -c/--critical <threshold> ]
@@ -38,6 +38,7 @@
 
 import argparse
 import copy
+import html
 import os
 import re
 import sys
@@ -130,6 +131,28 @@ def _snmp_walk_multi_or_exit(args, oid):
         print(result)
         sys.exit(rc)
     return result
+
+
+def _render_table(args, headers, rows, bad_row_mask=None):
+    """Render a headers/rows table as plain ljust+pipe-delimited text (default, CLI/SSH-friendly) or
+    as an HTML <table> when --html-table is set (for Thruk instances with cgi.cfg escape_html_tags=0).
+    Values are html-escaped in the HTML branch since they may originate from device-supplied SNMP data
+    (ifAlias, entPhysicalDescr, etc.), which isn't a trusted source. bad_row_mask, if given, marks rows
+    (e.g. DOWN interfaces, not-OK components) to highlight in the HTML table."""
+    if not args.html_table:
+        widths = [max(len(header), *(len(row[i]) for row in rows)) for i, header in enumerate(headers)]
+        table = [" | ".join(h.ljust(w) for h, w in zip(headers, widths))]
+        table += [" | ".join(v.ljust(w) for v, w in zip(row, widths)) for row in rows]
+        return "\n".join(table)
+
+    bad_row_mask = bad_row_mask or [False] * len(rows)
+    lines = ['<table border="1" cellpadding="3" cellspacing="0">',
+             "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"]
+    for row, bad in zip(rows, bad_row_mask):
+        style = ' style="background-color:#f8d7da"' if bad else ""
+        lines.append(f"<tr{style}>" + "".join(f"<td>{html.escape(v)}</td>" for v in row) + "</tr>")
+    lines.append("</table>")
+    return "\n".join(lines)
 
 
 def _chunk_evenly(values, n):
@@ -671,10 +694,8 @@ def check_hardware(args):
 
     headers = ("Device Name", "Device Voltage", "Device RPM", "Device Status")
     hw_rows = [(name, voltage, rpm, state_label) for name, state_label, _, voltage, rpm in components]
-    widths = [max(len(header), *(len(row[i]) for row in hw_rows)) for i, header in enumerate(headers)]
-    table = [" | ".join(h.ljust(w) for h, w in zip(headers, widths))]
-    table += [" | ".join(v.ljust(w) for v, w in zip(row, widths)) for row in hw_rows]
-    print("\n".join(table))
+    bad_mask = [sev != 0 for _, _, sev, _, _ in components]
+    print(_render_table(args, headers, hw_rows, bad_mask))
     sys.exit(exit_code)
 
 
@@ -748,10 +769,8 @@ def check_interfaces(args):
     rows.sort(key=lambda row: row[2] != "DOWN")  # DOWN interfaces surface at the top of the table
 
     headers = ("Interface", "Alias", "Status", "Speed", "Errors(in/out)", "Discards(in/out)")
-    widths = [max(len(header), *(len(row[i]) for row in rows)) for i, header in enumerate(headers)]
-    table = [" | ".join(h.ljust(w) for h, w in zip(headers, widths))]
-    table += [" | ".join(v.ljust(w) for v, w in zip(row, widths)) for row in rows]
-    print("\n".join(table))
+    bad_mask = [row[2] == "DOWN" for row in rows]
+    print(_render_table(args, headers, rows, bad_mask))
     sys.exit(exit_code)
 
 
@@ -760,7 +779,7 @@ def main():
         "%(prog)s -H/--hostname <host>\n"
         "           ( -C/--community <community> | --user <user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]\n"
         "             [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )\n"
-        "           [-t/--timeout <seconds>] [-v/--verbose]\n"
+        "           [-t/--timeout <seconds>] [-v/--verbose] [--html-table]\n"
         "           --mode MODE\n"
         "           [-w/--warning <threshold>] [-c/--critical <threshold>]"
     )
@@ -784,6 +803,11 @@ def main():
     parser.add_argument("--privpw", help="SNMPv3 priv password (or set SNMP_PRIVPW env var instead, to avoid exposing it in the process list)")
     parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
+    parser.add_argument("--html-table", action="store_true",
+                        help="Render the hardware/interfaces detail table as an HTML <table> instead of "
+                             "plain ljust+pipe-delimited text. Only useful for a frontend that renders raw "
+                             "HTML in plugin output (e.g. Thruk with cgi.cfg escape_html_tags=0) - leave "
+                             "unset for CLI/SSH testing, where plain text stays readable.")
     parser.add_argument("--mode", required=True, metavar="MODE",
                         choices=["ha_summary", "ha_pair", "cpu", "memory", "connections",
                                  "uptime", "primary_state",

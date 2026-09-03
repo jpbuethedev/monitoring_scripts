@@ -314,4 +314,6 @@ The `ha_pair` output also best-effort labels which IP is the Primary/Secondary u
 
 `--authpw`/`--privpw` can also be supplied via the `SNMP_AUTHPW`/`SNMP_PRIVPW` environment variables instead of as CLI flags, avoiding exposure of SNMPv3 credentials in the process list (`ps`/`/proc/<pid>/cmdline`); the CLI flag takes precedence if both are set.
 
+Both the `hardware` and `interfaces` tables can optionally be rendered as a real HTML `<table>` instead of plain ljust+pipe-delimited text by passing `--html-table` — only useful for a frontend that renders raw HTML in plugin output (e.g. Thruk with `cgi.cfg` `escape_html_tags=0`); leave it unset for CLI/SSH testing, where plain text stays readable. DOWN interfaces/not-OK components get a highlighted row background in the HTML table. All device-supplied SNMP strings (`ifAlias`, `entPhysicalDescr`, etc.) are HTML-escaped before being embedded, since that data isn't a trusted source.
+
 Running the script with no arguments prints usage/help and exits `UNKNOWN` instead of argparse's terse error. `--community`/`--user` credentials are required up front (`UNKNOWN` if neither is given). An SNMP timeout (unreachable host) is reported as `UNKNOWN` rather than `CRITICAL`, and any unexpected error or manual interruption (Ctrl+C) is caught and reported as a single-line `UNKNOWN` result instead of a raw Python traceback.
