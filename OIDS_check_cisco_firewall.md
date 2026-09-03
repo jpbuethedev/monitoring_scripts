@@ -184,7 +184,7 @@ Time since last reboot, from the standard MIB-II `sysUpTime` scalar (hundredths 
 Both thresholds are optional; without them the check always reports OK and just publishes the uptime as performance data.
 
 ## primary_state / secondary_state
-Combined text role and numeric HA state, sharing `_check_combined_state()`. `cfwHardwareStatusDetail`/`cfwHardwareStatusValue` are **fixed, configured-role** entries shared cluster-wide by the HA pair's MIB — querying either paired unit's IP returns identical output.
+Numeric HA state, cross-checked against the text role, sharing `_check_combined_state()`. `cfwHardwareStatusDetail`/`cfwHardwareStatusValue` are **fixed, configured-role** entries shared cluster-wide by the HA pair's MIB — querying either paired unit's IP returns identical output for these two OIDs.
 
 | OID name | OID | Table / index |
 |---|---|---|
@@ -200,42 +200,50 @@ Combined text role and numeric HA state, sharing `_check_combined_state()`. `cfw
 
 ### Role text (`cfwHardwareStatusDetail`) meanings
 
-The detail string is free text; the script substring-matches it (case-insensitive):
+The detail string is free text; the script substring-matches it (case-insensitive) into an `active`/`standby`/undeterminable **activity category** — it is no longer printed verbatim as separate output, only used to cross-check the numeric state below:
 
-| Text contains | Role reported | Role exit contribution |
+| Text contains | Role activity | Role exit contribution |
 |---|---|---|
-| `"active"` | "Active unit" | `0` OK |
-| `"standby"` (but not `"cold"`) | "Standby unit" | `0` OK |
-| Anything else non-empty | The raw text, verbatim | `2` CRITICAL |
-| Empty/missing, but numeric state present | "unknown" | `3` UNKNOWN |
+| `"active"` | `active` | `0` OK |
+| `"standby"` (but not `"cold"`) | `standby` | `0` OK |
+| Anything else non-empty | *(undeterminable)* | `2` CRITICAL |
+| Empty/missing, but numeric state present | *(undeterminable)* | `3` UNKNOWN |
 | Both text and numeric state missing | — | `3` UNKNOWN — "No role/state information available (failover not configured?)" |
 
 ### Numeric state (`cfwHardwareStatusValue`) meanings — `PEER_NUMERIC_STATE_MAP`
 
-This is a platform-specific extension beyond the official CISCO-FIREWALL-MIB `HardwareStatus` textual convention (which only defines values up to `10`) — confirmed against real device output:
+This is a platform-specific extension beyond the official CISCO-FIREWALL-MIB `HardwareStatus` textual convention (which only defines values up to `10`) — confirmed against real device output. `state_label` is also mapped into the same `active`/`standby`/undeterminable activity category used by the role-text cross-check above:
 
-| Value | State label | Failover-safe? | State exit contribution |
-|---|---|---|---|
-| `9` | Active | Yes | `0` OK |
-| `10` | Standby Ready | Yes (both units OK) | `0` OK |
-| `11` | Standby Cold | No | `2` CRITICAL |
-| `12` | Failed | No (both units CRITICAL) | `2` CRITICAL |
-| *(any other value)* | "Forming/Unknown" | No | `2` CRITICAL |
-| *(missing instance)* | "unknown" | — | `3` UNKNOWN |
+| Value | State label | Activity category | Failover-safe? | State exit contribution |
+|---|---|---|---|---|
+| `9` | Active | `active` | Yes | `0` OK |
+| `10` | Standby Ready | `standby` | Yes (both units OK) | `0` OK |
+| `11` | Standby Cold | `standby` | No | `2` CRITICAL |
+| `12` | Failed | *(undeterminable)* | No (both units CRITICAL) | `2` CRITICAL |
+| *(any other value)* | "Forming/Unknown" | *(undeterminable)* | No | `2` CRITICAL |
+| *(missing instance)* | "unknown" | *(undeterminable)* | — | `3` UNKNOWN |
 
-### Combined result
+### Text/numeric cross-check (replaces the old "combined text role" duplication)
 
-The mode's final exit code is `max(role_exit, state_exit)` from the two tables above — either the text role or the numeric state can independently push the result to WARNING/CRITICAL/UNKNOWN.
+Previously the output printed the text role (e.g. "Active unit") and the numeric state label (e.g. "Active (9)") side by side, which was redundant — both OIDs describe the same active/standby fact, just via two independent SNMP objects. The output now shows the numeric state once and appends a compact cross-check note instead:
 
-### Queried-unit annotation
+| Condition | Note | Exit code effect |
+|---|---|---|
+| Both role text and numeric state resolve to an activity category, and they agree | `(confirmed by role text)` | none (no change) |
+| Either side's activity category is undeterminable (missing/unrecognized) | `(role/state cross-check unavailable)` | none (each side's own exit contribution still applies) |
+| Both resolve to an activity category, but they disagree (e.g. text says "Active unit" while the numeric state is Standby Ready) | `` `(MISMATCH: role text says '<text>')` `` | forces `2` CRITICAL — this is a genuine inconsistency the old side-by-side format could silently miss (previously `role_exit`/`state_exit` were computed fully independently with no cross-reference, so an active-vs-standby disagreement between the two OIDs wasn't itself detected as a failure) |
 
-Both modes also best-effort annotate the queried IP's own active/standby status via `_determine_unit_role()` (same helper `ha_pair` uses — see [Primary/Secondary IP labeling](#primarysecondary-ip-labeling-_determine_unit_role) above):
+The mode's final exit code is `max(role_exit, state_exit)`, further escalated to `2` CRITICAL on a mismatch per the table above.
 
-| Condition | Note appended |
+### Queried-unit note
+
+Both modes also best-effort identify whether the queried IP is itself the unit being reported on, via `_determine_unit_role()` (same helper `ha_pair` uses — see [Primary/Secondary IP labeling](#primarysecondary-ip-labeling-_determine_unit_role) above):
+
+| Condition | Note |
 |---|---|
-| Queried IP's slot (primary/secondary) matches this mode's fixed `hw_index` | `[<ip> = <role> unit, currently <role text>]` — the printed role text describes the queried IP directly |
-| Queried IP's slot does *not* match this mode's fixed `hw_index` | `[<ip> = <role> unit, currently <flipped role text>; this result reflects the <primary/secondary>/peer unit]` — the printed role text describes the peer, so it's flipped (Active↔Standby) to also state the queried IP's own status |
-| `_determine_unit_role()` can't determine a role, or the role text isn't `Active unit`/`Standby unit` | No note appended |
+| Queried IP's own slot (primary/secondary) matches this mode's fixed `hw_index` | Trailing `[confirmed: <ip> is the <role> unit]` |
+| Queried IP's own slot does *not* match this mode's fixed `hw_index` | Leading `NOTE: <ip> is the <role> unit; showing the <primary/secondary> unit's state instead - ` prepended to the summary, so the caveat is read before the (otherwise identical-looking) state data, instead of trailing after it |
+| `_determine_unit_role()` can't determine a role at all | No note |
 
 ## sysinfo
 Hardware description, hostname and chassis model — purely informational, no thresholds or status enum.

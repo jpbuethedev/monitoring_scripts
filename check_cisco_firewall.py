@@ -30,10 +30,14 @@
 #   memory              - system/data-plane memory pool usage; --warning/--critical are percent (default 80/90)
 #   connections         - current in-use connections; --warning/--critical are connection counts
 #   uptime              - sysUpTime since last reboot; --warning/--critical are minimum seconds (optional)
-#   primary_state       - combined text role and numeric HA state of the primary unit (cfwHardwareStatusDetail/Value index 6);
-#                          same result regardless of which paired unit's IP is queried
-#   secondary_state      - combined text role and numeric HA state of the secondary unit (cfwHardwareStatusDetail/Value index 7);
-#                          same result regardless of which paired unit's IP is queried
+#   primary_state       - numeric HA state of the primary unit (cfwHardwareStatusValue index 6), cross-checked
+#                          against cfwHardwareStatusDetail's text role; same result regardless of which paired
+#                          unit's IP is queried, but the output leads with a NOTE if the queried unit isn't
+#                          itself the primary
+#   secondary_state      - numeric HA state of the secondary unit (cfwHardwareStatusValue index 7), cross-checked
+#                          against cfwHardwareStatusDetail's text role; same result regardless of which paired
+#                          unit's IP is queried, but the output leads with a NOTE if the queried unit isn't
+#                          itself the secondary
 #   sysinfo             - hardware description, hostname and chassis model (sysDescr, sysName, entPhysicalModelName)
 #   hardware            - fan tray / power supply operational status (cefcFanTrayOperStatus, cefcFRUPowerOperStatus)
 #   interfaces          - admin/oper status, link speed and error/discard counters of all real
@@ -564,45 +568,54 @@ def _check_combined_state(args, hw_index, label):
         sys.exit(3)
 
     if _is_missing(text) or not text.strip():
-        role_exit, role = 3, "unknown"
+        role_exit, role_activity = 3, None
     else:
         lower = text.lower()
         if "active" in lower:
-            role_exit, role = 0, "Active unit"
+            role_exit, role_activity = 0, "active"
         elif "standby" in lower and "cold" not in lower:
-            role_exit, role = 0, "Standby unit"
+            role_exit, role_activity = 0, "standby"
         else:
-            role_exit, role = 2, text
+            role_exit, role_activity = 2, None
 
     if _is_missing(value):
-        state_exit, state_label, numeric = 3, "unknown", None
+        state_exit, state_label, numeric, state_activity = 3, "unknown", None, None
     else:
         numeric = int(value)
         state_label, failover_safe = PEER_NUMERIC_STATE_MAP.get(numeric, ("Forming/Unknown", False))
         state_exit = 0 if failover_safe else 2
+        state_activity = "active" if state_label == "Active" else \
+            "standby" if state_label in ("Standby Ready", "Standby Cold") else None
 
     exit_code = max(role_exit, state_exit)
+
+    # cfwHardwareStatusDetail (text) and cfwHardwareStatusValue (numeric) independently report the
+    # same active/standby fact - cross-check them instead of printing both as if they were separate
+    # pieces of information; a disagreement here is a real (if rare) inconsistency worth flagging.
+    if role_activity is None or state_activity is None:
+        cross_check_note = " (role/state cross-check unavailable)"
+    elif role_activity == state_activity:
+        cross_check_note = " (confirmed by role text)"
+    else:
+        cross_check_note = f" (MISMATCH: role text says '{text.strip()}')"
+        exit_code = 2
+
     status = NAGIOS_STATUS[exit_code]
     numeric_str = str(numeric) if numeric is not None else "n/a"
+    summary = f"{label}: {state_label} ({numeric_str}){cross_check_note}"
 
-    # hw_index (6=primary, 7=secondary) is a fixed configured role shared by the whole HA pair,
-    # so querying either paired unit's IP returns identical output - the label makes that explicit
-    # instead of implying "local"/"peer" relative to the queried hostname.
+    # hw_index (6=primary, 7=secondary) is a fixed configured role shared by the whole HA pair, so
+    # querying either paired unit's IP reports identical data for this slot regardless of which
+    # physical unit answered - when it isn't the queried unit's own slot, lead with that fact.
     hw_role = "primary" if hw_index == HW_INDEX_PRIMARY else "secondary"
     queried_role = _determine_unit_role(args, args.hostname)
-    if queried_role and role in ("Active unit", "Standby unit"):
-        if queried_role == hw_role:
-            role_note = f" [{args.hostname} = {queried_role} unit, currently {role}]"
-        else:
-            # this hw_index's slot isn't the queried IP's own slot, so flip to the queried IP's
-            # actual state (a healthy pair always has exactly one active and one standby unit)
-            queried_state = "Standby unit" if role == "Active unit" else "Active unit"
-            role_note = (f" [{args.hostname} = {queried_role} unit, currently {queried_state}; "
-                         f"this result reflects the {hw_role}/peer unit]")
-    else:
-        role_note = f" [queried unit is {queried_role}]" if queried_role else ""
+    if queried_role == hw_role:
+        summary += f" [confirmed: {args.hostname} is the {hw_role} unit]"
+    elif queried_role is not None:
+        summary = (f"NOTE: {args.hostname} is the {queried_role} unit; showing the {hw_role} "
+                   f"unit's state instead - {summary}")
 
-    print(f"{status} - {label}: {role}, State: {state_label} ({numeric_str}){role_note} | state={numeric_str if numeric is not None else ''};;;;")
+    print(f"{status} - {summary} | state={numeric_str if numeric is not None else ''};;;;")
     sys.exit(exit_code)
 
 
