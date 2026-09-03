@@ -75,6 +75,20 @@ Unlike `cfwHardwareStatusValue`/`cfwHardwareStatusDetail`, which are fixed, pair
 
 `_determine_unit_role(args, host)` GETs `cfwHardwareInformation.6` and `.7` from `host` and returns `"primary"`/`"secondary"` if either instance's text contains `"this device"` (case-insensitive), else `None`. `check_ha_pair()` calls this once for `--hostname` and once for the (given or auto-detected) peer, then labels the output as `Primary [<ip>]`/`Secondary [<ip>]`. If the OID isn't populated on a given platform or credentials/timeout fail for these extra GETs, the labels are silently omitted (`None`) rather than guessed — this is purely additive and never affects the exit code.
 
+### Role-complementarity cross-check
+
+Matching primary/secondary numeric states between `--hostname` and the peer isn't proof the two units are actually paired with each other — an unrelated but individually-healthy unit would report the same 9/10 states too. `check_ha_pair()` additionally requires `hostname_role != peer_role` (via `_determine_unit_role()` above) whenever both sides populate the OID:
+
+| Condition | Exit code | Summary |
+|---|---|---|
+| Both sides report a role, and they're the same (e.g. both "primary") | `2` CRITICAL | "HA pair role mismatch: ... both self-identify as '`<role>`' ..." |
+| Either side's role is undeterminable (OID not populated) | *(check skipped)* | Output appends "(role cross-check unavailable on this platform)" |
+| Both sides report a role, and they're complementary | *(no effect)* | — |
+
+### No SNMP-based peer-IP discovery exists
+
+Confirmed via a full `snmpwalk` of a live paired unit (root OID `.1`, entire agent tree): no OID anywhere on the device — under `CISCO-FIREWALL-MIB` (`1.3.6.1.4.1.9.9.147`) or otherwise — exposes the peer unit's IP address as text or as an `IpAddress`-typed value. `cfwHardwareStatusTable` does have a third row beyond the fixed primary(`.6`)/secondary(`.7`) indices — index `.4`, labeled `"Failover LAN Interface"` — but this only describes the failover link itself (e.g. `cfwHardwareStatusDetail.4 = "HA-Control Ethernet1/9"`), not a peer address. CISCO-CDP-MIB (`1.3.6.1.4.1.9.9.23`) is also not populated on this platform. This confirms the `+/-2` last-octet IP heuristic (`_guess_peer_candidates()`/`_discover_peer()`) and an explicit `--peer-hostname` remain the only ways to identify which IP to query as the peer — there is no OID-based alternative to fall back on.
+
 ## cpu
 Average CPU load (5s/1m/5m), from CISCO-PROCESS-MIB's CPU history table.
 
