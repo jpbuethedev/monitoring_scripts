@@ -225,15 +225,15 @@ This is a platform-specific extension beyond the official CISCO-FIREWALL-MIB `Ha
 
 ### Text/numeric cross-check (replaces the old "combined text role" duplication)
 
-Previously the output printed the text role (e.g. "Active unit") and the numeric state label (e.g. "Active (9)") side by side, which was redundant — both OIDs describe the same active/standby fact, just via two independent SNMP objects. The output now shows the numeric state once and appends a compact cross-check note instead:
+Previously the output printed the text role (e.g. "Active unit") and the numeric state label (e.g. "Active (9)") side by side, which was redundant — both OIDs describe the same active/standby fact, just via two independent SNMP objects. The output now shows the numeric state once, silently on agreement (the expected/boring case, which adds no new information), and only appends a note when something's actually notable:
 
 | Condition | Note | Exit code effect |
 |---|---|---|
-| Both role text and numeric state resolve to an activity category, and they agree | `(confirmed by role text)` | none (no change) |
+| Both role text and numeric state resolve to an activity category, and they agree | *(no note)* | none (no change) |
 | Either side's activity category is undeterminable (missing/unrecognized) | `(role/state cross-check unavailable)` | none (each side's own exit contribution still applies) |
 | Both resolve to an activity category, but they disagree (e.g. text says "Active unit" while the numeric state is Standby Ready) | `` `(MISMATCH: role text says '<text>')` `` | forces `2` CRITICAL — this is a genuine inconsistency the old side-by-side format could silently miss (previously `role_exit`/`state_exit` were computed fully independently with no cross-reference, so an active-vs-standby disagreement between the two OIDs wasn't itself detected as a failure) |
 
-The mode's final exit code is `max(role_exit, state_exit)`, further escalated to `2` CRITICAL on a mismatch per the table above.
+The mode's final exit code is `max(role_exit, state_exit)`, further escalated to `2` CRITICAL on a mismatch per the table above. Making the MISMATCH note the only one shown by default (instead of always printing something) means it stands out precisely because it's rare, rather than being buried among routine reassurance text.
 
 ### Queried-unit note
 
@@ -241,9 +241,11 @@ Both modes also best-effort identify whether the queried IP is itself the unit b
 
 | Condition | Note |
 |---|---|
-| Queried IP's own slot (primary/secondary) matches this mode's fixed `hw_index` | Trailing `[confirmed: <ip> is the <role> unit]` |
-| Queried IP's own slot does *not* match this mode's fixed `hw_index` | Leading `NOTE: <ip> is the <role> unit; showing the <primary/secondary> unit's state instead - ` prepended to the summary, so the caveat is read before the (otherwise identical-looking) state data, instead of trailing after it |
+| Queried IP's own slot (primary/secondary) matches this mode's fixed `hw_index` | Trailing `[queried unit is <role>]` |
+| Queried IP's own slot does *not* match this mode's fixed `hw_index` | Leading `NOTE: <ip> is <role>; showing <primary/secondary> (peer) state - ` prepended to the summary, so the caveat is read before the (otherwise identical-looking) state data, instead of trailing after it |
 | `_determine_unit_role()` can't determine a role at all | No note |
+
+The word "confirmed" is deliberately avoided here — it's also used by the cross-check note above for a completely different fact (text/numeric OID agreement), and reusing it for two unrelated meanings in the same line was a source of confusion.
 
 ## sysinfo
 Hardware description, hostname and chassis model — purely informational, no thresholds or status enum.

@@ -591,14 +591,15 @@ def _check_combined_state(args, hw_index, label):
 
     # cfwHardwareStatusDetail (text) and cfwHardwareStatusValue (numeric) independently report the
     # same active/standby fact - cross-check them instead of printing both as if they were separate
-    # pieces of information; a disagreement here is a real (if rare) inconsistency worth flagging.
-    if role_activity is None or state_activity is None:
-        cross_check_note = " (role/state cross-check unavailable)"
-    elif role_activity == state_activity:
-        cross_check_note = " (confirmed by role text)"
-    else:
+    # pieces of information. Agreement is the expected/boring case and adds no new information, so
+    # it's left silent; only a disagreement (a real, if rare, inconsistency) is called out.
+    if role_activity is not None and state_activity is not None and role_activity != state_activity:
         cross_check_note = f" (MISMATCH: role text says '{text.strip()}')"
         exit_code = 2
+    elif role_activity is None or state_activity is None:
+        cross_check_note = " (role/state cross-check unavailable)"
+    else:
+        cross_check_note = ""
 
     status = NAGIOS_STATUS[exit_code]
     numeric_str = str(numeric) if numeric is not None else "n/a"
@@ -610,10 +611,9 @@ def _check_combined_state(args, hw_index, label):
     hw_role = "primary" if hw_index == HW_INDEX_PRIMARY else "secondary"
     queried_role = _determine_unit_role(args, args.hostname)
     if queried_role == hw_role:
-        summary += f" [confirmed: {args.hostname} is the {hw_role} unit]"
+        summary += f" [queried unit is {hw_role}]"
     elif queried_role is not None:
-        summary = (f"NOTE: {args.hostname} is the {queried_role} unit; showing the {hw_role} "
-                   f"unit's state instead - {summary}")
+        summary = (f"NOTE: {args.hostname} is {queried_role}; showing {hw_role} (peer) state - {summary}")
 
     print(f"{status} - {summary} | state={numeric_str if numeric is not None else ''};;;;")
     sys.exit(exit_code)
