@@ -21,7 +21,11 @@
 #                          querying it; if no candidate can be confirmed, exits WARNING rather than
 #                          guessing blindly - pass --peer-hostname explicitly in that case. Output
 #                          best-effort labels which IP is Primary/Secondary using cfwHardwareInformation's
-#                          self-referential "(this device)" text, when the platform populates it
+#                          self-referential "(this device)" text, when the platform populates it. Also
+#                          cross-checks the two units self-identify as complementary primary/secondary
+#                          roles (when that OID is populated) - matching numeric states alone doesn't
+#                          prove an actual pairing, since an unrelated but individually-healthy unit
+#                          would match too; exits CRITICAL if both sides self-identify as the same role
 #   cpu                 - average CPU load (5s/1m/5m); --warning/--critical are percent (default 80/90)
 #   memory              - system/data-plane memory pool usage; --warning/--critical are percent (default 80/90)
 #   connections         - current in-use connections; --warning/--critical are connection counts
@@ -324,10 +328,12 @@ def _determine_unit_role(args, host):
 
 def check_ha_pair(args):
     """Cross-check HA state by independently querying both paired units' IPs, requiring both to
-    be reachable, agree on the pair's state, and report a failover-safe numeric state (9/10).
-    If --peer-hostname isn't given, the peer is guessed via _discover_peer() and confirmed by a
-    live query before being trusted; if no candidate can be confirmed, exits WARNING instead of
-    guessing blindly."""
+    be reachable, agree on the pair's state, report a failover-safe numeric state (9/10), and (when
+    the platform exposes it) self-identify as complementary primary/secondary roles - matching numeric
+    states alone doesn't prove an actual pairing, since an unrelated but individually-healthy unit
+    would match too. If --peer-hostname isn't given, the peer is guessed via _discover_peer() and
+    confirmed by a live query before being trusted; if no candidate can be confirmed, exits WARNING
+    instead of guessing blindly."""
     local_primary, local_secondary, rc, err = _query_pair_state(args, args.hostname)
     if rc != 0:
         print(f"CRITICAL - Unit {args.hostname} unreachable via SNMP: {err}")
@@ -380,14 +386,27 @@ def check_ha_pair(args):
 
     hostname_role = _determine_unit_role(args, args.hostname)
     peer_role = _determine_unit_role(args, peer_hostname)
+
+    # Matching numeric states alone isn't proof of an actual pairing - two unrelated but each
+    # individually-healthy units would match too. Self-identified roles must be complementary.
+    if hostname_role is not None and peer_role is not None and hostname_role == peer_role:
+        print(
+            f"CRITICAL - HA pair role mismatch: {args.hostname} and {peer_hostname} both self-identify "
+            f"as '{hostname_role}' - failover states matched but these do not appear to be paired with "
+            f"each other; verify --peer-hostname | {perf}"
+        )
+        sys.exit(2)
+
     primary_ip = args.hostname if hostname_role == "primary" else peer_hostname if peer_role == "primary" else None
     secondary_ip = args.hostname if hostname_role == "secondary" else peer_hostname if peer_role == "secondary" else None
     primary_ip_note = f" [{primary_ip}]" if primary_ip else ""
     secondary_ip_note = f" [{secondary_ip}]" if secondary_ip else ""
+    role_check_note = "" if (hostname_role is not None or peer_role is not None) \
+        else " (role cross-check unavailable on this platform)"
 
     print(
         f"{status} - Both units reachable and agree: Primary{primary_ip_note}: {primary_label} ({local_primary}), "
-        f"Secondary{secondary_ip_note}: {secondary_label} ({local_secondary}){peer_note} | {perf}"
+        f"Secondary{secondary_ip_note}: {secondary_label} ({local_secondary}){peer_note}{role_check_note} | {perf}"
     )
     sys.exit(exit_code)
 
