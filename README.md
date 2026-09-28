@@ -272,6 +272,22 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> -t <timeout in seconds> --mode <cpu|memory|swap|disk>
 ```
 
+**Recommended thresholds per mode** (the `-w`/`-c` defaults of 80/90 are generic; FMC's Linux memory-caching behavior and burst-y CPU make mode-specific values more useful):
+
+| Mode | `-w/--warning` | `-c/--critical` | Rationale |
+|---|---|---|---|
+| `cpu` | 85 | 95 | Snort/detection-engine and policy-apply spikes are normal and short-lived; the busiest-core escalation already catches a genuinely stuck core, so the average threshold can be looser. |
+| `memory` | 90 | 97 | FMC intentionally keeps physical RAM usage high (page cache/event buffers) — high usage alone isn't a fault, so avoid tight thresholds here. |
+| `swap` | 5 | 20 | FMC avoids swapping until RAM is genuinely exhausted, so any sustained swap usage is a meaningful sign of real memory pressure. |
+| `disk` | 80 | 90 | Standard safety margin; combine with `--exclude-mounts /dev/shm` (tmpfs, not meaningful) and treat `/var`/`/var/lib/mysql` (event DB/logs) as the mounts that matter most if space is tight. |
+
+```bash
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu    -w 85 -c 95
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory -w 90 -c 97
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap   -w 5  -c 20
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk   -w 80 -c 90 --exclude-mounts /dev/shm
+```
+
 **Output example:**
 ```
 OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;80.0;90.0;0;100

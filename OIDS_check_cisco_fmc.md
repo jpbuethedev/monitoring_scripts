@@ -113,6 +113,17 @@ Perfdata publishes one metric per mount, e.g. `disk=51.8%;80.0;90.0;0;100 var=42
 
 Below the single Nagios summary/perfdata line, one plain line per mount is printed (sorted by usage, worst first), e.g. `/=51.8%`. With `-v/--verbose`, each of those lines also shows used/total MB, e.g. `/=51.8% (12345.6MB/23456.7MB)`, instead of just the bare percentage.
 
+## Recommended thresholds
+
+The `--warning`/`--critical` defaults (80/90) are generic and apply uniformly to all four modes, but FMC's actual behavior warrants different values per mode:
+
+| Mode | `-w/--warning` | `-c/--critical` | Rationale |
+|---|---|---|---|
+| `cpu` | 85 | 95 | Snort/detection-engine and policy-apply spikes are normal and short-lived on a single SNMP snapshot; the busiest-core escalation already catches a genuinely stuck core, so the average threshold can be looser. |
+| `memory` | 90 | 97 | FMC intentionally keeps physical RAM usage high (page cache/event buffers) — high usage alone isn't a fault, so tight thresholds here just cause noise. |
+| `swap` | 5 | 20 | FMC avoids swapping until RAM is genuinely exhausted, so any sustained swap usage is a meaningful sign of real memory pressure, unlike physical RAM usage. |
+| `disk` | 80 | 90 | Standard safety margin; combine with `--exclude-mounts /dev/shm` (tmpfs, not meaningful) and treat `/var`/`/var/lib/mysql` (event DB/logs) as the mounts that matter most if space is tight. |
+
 ## Live validation
 
 All OIDs and table structures in this document were confirmed against a real FMC device (`ves-fmc`, `10.56.1.221`) via manual `snmpget`/`snmpwalk` and then via full end-to-end runs of `check_cisco_fmc.py` for all four modes, e.g.:
