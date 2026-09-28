@@ -13,7 +13,7 @@ Every mode maps its SNMP result onto the standard Nagios exit codes (`NAGIOS_STA
 | `2` | CRITICAL | Value(s) at/above `--critical` threshold |
 | `3` | UNKNOWN | SNMP error, missing/unpopulated OID, or no credentials given |
 
-All four modes share the same threshold logic (`_threshold_exit_code()`): critical takes precedence over warning, and both thresholds are percentages (default `--warning 80`, `--critical 90`).
+All four modes share the same threshold logic (`_threshold_exit_code()`): critical takes precedence over warning, and both thresholds are percentages. Each mode has its own `--warning`/`--critical` default (see `MODE_DEFAULT_THRESHOLDS` in the code, and the "Default thresholds" section below) rather than a flat 80/90, since FMC's bursty CPU and by-design high RAM usage aren't fault indicators the same way swap usage is.
 
 ## cpu
 Average CPU load across all reported processor cores, from HOST-RESOURCES-MIB's processor table.
@@ -28,8 +28,8 @@ Average CPU load across all reported processor cores, from HOST-RESOURCES-MIB's 
 
 | Condition | Exit code |
 |---|---|
-| Average CPU load ≥ `--critical` (default `90`) | `2` CRITICAL |
-| Average CPU load ≥ `--warning` (default `80`) | `1` WARNING |
+| Average CPU load ≥ `--critical` (default `95`) | `2` CRITICAL |
+| Average CPU load ≥ `--warning` (default `85`) | `1` WARNING |
 | Otherwise | `0` OK |
 | No CPU rows returned at all (`hrProcessorLoad` unpopulated) | `3` UNKNOWN |
 
@@ -65,8 +65,8 @@ Usage percentage is computed as `used_bytes / size_bytes * 100` for the RAM row.
 
 | Condition | Exit code |
 |---|---|
-| Usage % ≥ `--critical` (default `90`) | `2` CRITICAL |
-| Usage % ≥ `--warning` (default `80`) | `1` WARNING |
+| Usage % ≥ `--critical` (default `97`) | `2` CRITICAL |
+| Usage % ≥ `--warning` (default `90`) | `1` WARNING |
 | Otherwise | `0` OK |
 | No `hrStorageRam`-typed row found | `3` UNKNOWN |
 
@@ -82,8 +82,8 @@ Virtual memory/swap usage, from the `hrStorageTable` entry of type `hrStorageVir
 | Condition | Exit code |
 |---|---|
 | No swap configured (`hrStorageSize` is `0`) | `0` OK ("No swap configured") |
-| Usage % ≥ `--critical` (default `90`) | `2` CRITICAL |
-| Usage % ≥ `--warning` (default `80`) | `1` WARNING |
+| Usage % ≥ `--critical` (default `20`) | `2` CRITICAL |
+| Usage % ≥ `--warning` (default `5`) | `1` WARNING |
 | Otherwise | `0` OK |
 | No row with "swap" in its descr found among `hrStorageVirtualMemory`-typed rows | `3` UNKNOWN |
 
@@ -113,9 +113,9 @@ Perfdata publishes one metric per mount, e.g. `disk=51.8%;80.0;90.0;0;100 var=42
 
 Below the single Nagios summary/perfdata line, one plain line per mount is printed (sorted by usage, worst first), e.g. `/=51.8%`. With `-v/--verbose`, each of those lines also shows used/total MB, e.g. `/=51.8% (12345.6MB/23456.7MB)`, instead of just the bare percentage.
 
-## Recommended thresholds
+## Default thresholds
 
-The `--warning`/`--critical` defaults (80/90) are generic and apply uniformly to all four modes, but FMC's actual behavior warrants different values per mode:
+Each mode has its own `--warning`/`--critical` default (see `MODE_DEFAULT_THRESHOLDS` in the code) rather than a flat 80/90, since FMC's actual behavior warrants different values per mode:
 
 | Mode | `-w/--warning` | `-c/--critical` | Rationale |
 |---|---|---|---|
@@ -129,9 +129,9 @@ The `--warning`/`--critical` defaults (80/90) are generic and apply uniformly to
 All OIDs and table structures in this document were confirmed against a real FMC device (`ves-fmc`, `10.56.1.221`) via manual `snmpget`/`snmpwalk` and then via full end-to-end runs of `check_cisco_fmc.py` for all four modes, e.g.:
 
 ```
-OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;80.0;90.0;0;100
-OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;80.0;90.0;0;100
-OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;80.0;90.0;0;100
+OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;85.0;95.0;0;100
+OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;90.0;97.0;0;100
+OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;5.0;20.0;0;100
 OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 /=51.8%
 /Volume=42.9%

@@ -263,8 +263,8 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `-t/--timeout` | 30 | SNMP timeout in seconds |
 | `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to each mount's output line |
 | `--mode` | required | `cpu`, `memory`, `swap`, or `disk` |
-| `-w/--warning` | 80 | Warning threshold in percent |
-| `-c/--critical` | 90 | Critical threshold in percent |
+| `-w/--warning` | mode-dependent | Warning threshold in percent (see table below) |
+| `-c/--critical` | mode-dependent | Critical threshold in percent (see table below) |
 | `--exclude-mounts` | — | `disk` mode only: comma-separated list of mount paths to exclude (e.g. `/dev/shm,/boot`) |
 
 **Usage:**
@@ -272,7 +272,7 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> -t <timeout in seconds> --mode <cpu|memory|swap|disk>
 ```
 
-**Recommended thresholds per mode** (the `-w`/`-c` defaults of 80/90 are generic; FMC's Linux memory-caching behavior and burst-y CPU make mode-specific values more useful):
+**Default thresholds per mode** (used when `-w`/`-c` aren't given explicitly; tuned for FMC's Linux memory-caching behavior and burst-y CPU rather than a flat 80/90 for every mode):
 
 | Mode | `-w/--warning` | `-c/--critical` | Rationale |
 |---|---|---|---|
@@ -282,17 +282,17 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `disk` | 80 | 90 | Standard safety margin; combine with `--exclude-mounts /dev/shm` (tmpfs, not meaningful) and treat `/var`/`/var/lib/mysql` (event DB/logs) as the mounts that matter most if space is tight. |
 
 ```bash
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu    -w 85 -c 95
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory -w 90 -c 97
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap   -w 5  -c 20
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk   -w 80 -c 90 --exclude-mounts /dev/shm
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk --exclude-mounts /dev/shm
 ```
 
 **Output example:**
 ```
-OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;80.0;90.0;0;100
-OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;80.0;90.0;0;100
-OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;80.0;90.0;0;100
+OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;85.0;95.0;0;100
+OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;90.0;97.0;0;100
+OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;5.0;20.0;0;100
 OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 /=51.8%
 /Volume=42.9%

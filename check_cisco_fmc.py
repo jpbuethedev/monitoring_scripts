@@ -11,18 +11,21 @@
 #            [ -w/--warning <percent> ] [ -c/--critical <percent> ]
 #
 # Modes (all via HOST-RESOURCES-MIB, since FMC is a Linux-based appliance rather than an
-# IOS/ASA platform - CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB are not applicable here):
-#   cpu     - average hrProcessorLoad across all reported CPUs; --warning/--critical are
-#             percent (default 80/90). Also escalates if any single core is at/above the
-#             thresholds even when the average isn't, so one pegged core can't hide behind
-#             an otherwise-idle fleet of cores.
+# IOS/ASA platform - CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB are not applicable here).
+# --warning/--critical default to different values per mode (see MODE_DEFAULT_THRESHOLDS
+# below) since FMC's bursty CPU and by-design high RAM usage aren't fault indicators on
+# their own, while swap usage is a much more meaningful memory-pressure signal:
+#   cpu     - average hrProcessorLoad across all reported CPUs; default 85/95. Also
+#             escalates if any single core is at/above the thresholds even when the
+#             average isn't, so one pegged core can't hide behind an otherwise-idle
+#             fleet of cores.
 #   memory  - physical RAM usage from the hrStorageTable entry of type hrStorageRam;
-#             --warning/--critical are percent (default 80/90)
+#             default 90/97
 #   swap    - virtual memory/swap usage from the hrStorageTable entry of type
-#             hrStorageVirtualMemory; --warning/--critical are percent (default 80/90);
-#             reports OK if no swap is configured (size 0)
+#             hrStorageVirtualMemory; default 5/20; reports OK if no swap is configured
+#             (size 0)
 #   disk    - usage of every hrStorageTable entry of type hrStorageFixedDisk; the worst
-#             mount determines the overall status; --warning/--critical are percent
+#             mount determines the overall status; default 80/90
 #             (default 80/90). --exclude-mounts drops named mounts from consideration.
 
 import argparse
@@ -34,6 +37,17 @@ from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_walk_indexed, snmp_value_
 HR_STORAGE_TYPE_RAM = "1.3.6.1.2.1.25.2.1.2"
 HR_STORAGE_TYPE_VIRTUAL_MEMORY = "1.3.6.1.2.1.25.2.1.3"
 HR_STORAGE_TYPE_FIXED_DISK = "1.3.6.1.2.1.25.2.1.4"
+
+# Default --warning/--critical percent per --mode, used when not given explicitly on the CLI.
+# cpu/memory are looser since FMC's bursty CPU and by-design high RAM usage (page cache/event
+# buffers) aren't fault indicators on their own; swap is tighter since FMC avoids swapping
+# until RAM is genuinely exhausted, making it the more meaningful memory-pressure signal.
+MODE_DEFAULT_THRESHOLDS = {
+    "cpu": (85.0, 95.0),
+    "memory": (90.0, 97.0),
+    "swap": (5.0, 20.0),
+    "disk": (80.0, 90.0),
+}
 
 
 def _snmp_walk_or_exit(args, oid):
@@ -220,8 +234,12 @@ def main():
                              "    memory    (Physical RAM usage)\n"
                              "    swap      (Virtual memory/swap usage)\n"
                              "    disk      (Usage of every fixed disk/mount reported; worst one decides status)")
-    parser.add_argument("-w", "--warning", type=float, default=80.0, help="Warning threshold in percent (default 80)")
-    parser.add_argument("-c", "--critical", type=float, default=90.0, help="Critical threshold in percent (default 90)")
+    parser.add_argument("-w", "--warning", type=float, default=None,
+                        help="Warning threshold in percent (default varies by mode: "
+                             "cpu 85, memory 90, swap 5, disk 80)")
+    parser.add_argument("-c", "--critical", type=float, default=None,
+                        help="Critical threshold in percent (default varies by mode: "
+                             "cpu 95, memory 97, swap 20, disk 90)")
     parser.add_argument("--exclude-mounts", default="",
                         help="Comma-separated list of mount paths to exclude from --mode disk (e.g. /dev/shm,/boot)")
 
@@ -239,14 +257,18 @@ def main():
         print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
         sys.exit(3)
 
+    default_warning, default_critical = MODE_DEFAULT_THRESHOLDS[args.mode]
+    warning = args.warning if args.warning is not None else default_warning
+    critical = args.critical if args.critical is not None else default_critical
+
     if args.mode == "cpu":
-        check_cpu(args, args.warning, args.critical)
+        check_cpu(args, warning, critical)
     elif args.mode == "memory":
-        check_memory(args, args.warning, args.critical)
+        check_memory(args, warning, critical)
     elif args.mode == "swap":
-        check_swap(args, args.warning, args.critical)
+        check_swap(args, warning, critical)
     elif args.mode == "disk":
-        check_disk(args, args.warning, args.critical)
+        check_disk(args, warning, critical)
 
 
 if __name__ == "__main__":
