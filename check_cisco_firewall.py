@@ -102,11 +102,13 @@ FRU_POWER_OPER_STATUS_MAP = {
 }
 FRU_POWER_OPER_STATUS_OK = 2  # "on"
 
-# ASA/FTD-internal pseudo-interfaces present on every unit regardless of configuration; excluded
+# ASA/FTD-internal pseudo-interfaces present on every unit regardless of configuration, plus
+# Docker/container bridge and veth interfaces seen on Linux-based platforms (e.g. FMC) - excluded
 # since they're not real monitored links. Interface naming for everything else (nameif) varies
 # significantly across firewall pairs/models, so a fixed named interface list isn't practical -
 # every other interface reported by SNMP is monitored dynamically instead.
-NOISE_IFNAME_PATTERNS = ("internal-data", "nlp_int_tap", "ccl_ha_nlp_int_tap", "ha_ctl_nlp_int_tap", "ethernet1/4")
+NOISE_IFNAME_PATTERNS = ("internal-data", "nlp_int_tap", "ccl_ha_nlp_int_tap", "ha_ctl_nlp_int_tap",
+                         "ethernet1/4", "br-", "docker0", "veth")
 
 
 def _is_missing(value):
