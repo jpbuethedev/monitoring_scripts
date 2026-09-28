@@ -208,6 +208,82 @@ check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_pa
 
 ---
 
+### `check_cisco_firewall.py`
+
+Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. Full OID/logic reference: [OIDS_check_cisco_firewall.md](OIDS_check_cisco_firewall.md).
+
+| Feature | Detail |
+|---|---|
+| **Language** | Python 3 (`rh-python38` shebang) |
+| **MIBs** | CISCO-FIREWALL-MIB, CISCO-PROCESS-MIB, CISCO-MEMORY-POOL-MIB, CISCO-ENHANCED-MEMPOOL-MIB, CISCO-ENTITY-FRU-CONTROL-MIB, ENTITY-MIB, IF-MIB |
+| **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
+| **Platform** | Cisco ASA / FTD / Secure Firewall 3100 |
+| **Modes** | `ha_summary`, `ha_pair`, `cpu`, `memory`, `connections`, `uptime`, `primary_state`, `secondary_state`, `sysinfo`, `hardware`, `interfaces` |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `-H/--hostname` | required | Target hostname or IP address |
+| `-C/--community` | — | SNMPv2c community string |
+| `--user` | — | SNMPv3 username |
+| `--peer-hostname` | auto-detected | Peer unit IP/hostname, used by `ha_pair` |
+| `-t/--timeout` | 30 | SNMP timeout in seconds |
+| `-w/--warning` / `-c/--critical` | mode-dependent | Thresholds (percent, seconds or counts depending on mode) |
+
+**Usage:**
+```bash
+./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--peer-hostname <host>] [-w/--warning <n>] [-c/--critical <n>]
+```
+
+**Output example:**
+```
+OK - Role=ACTIVE(active); HA Peer: reachable | peer_up=1
+```
+
+**Requirements:** `pysnmp`
+
+---
+
+### `check_cisco_fmc.py`
+
+Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SNMP. FMC is a Linux (Yocto) appliance rather than an IOS/ASA platform, so it uses HOST-RESOURCES-MIB instead of the ASA-specific CISCO-PROCESS-MIB/CISCO-MEMORY-POOL-MIB. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. Full OID/logic reference: [OIDS_check_cisco_fmc.md](OIDS_check_cisco_fmc.md).
+
+| Feature | Detail |
+|---|---|
+| **Language** | Python 3 (`rh-python38` shebang) |
+| **MIBs** | HOST-RESOURCES-MIB (`hrProcessorLoad`, `hrStorageTable`) |
+| **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
+| **Platform** | Cisco Secure Firewall Management Center (FMC) |
+| **Modes** | `cpu` (average CPU load across all reported cores; also escalates if any single core is at/above threshold even when the average isn't), `memory` (physical RAM usage), `swap` (virtual memory/swap usage; OK if no swap configured), `disk` (usage of every fixed-disk mount; worst one decides status; supports `--exclude-mounts`) |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `-H/--hostname` | required | FMC hostname or IP address |
+| `-C/--community` | — | SNMPv2c community string |
+| `--user` | — | SNMPv3 username |
+| `-t/--timeout` | 30 | SNMP timeout in seconds |
+| `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to the summary |
+| `--mode` | required | `cpu`, `memory`, `swap`, or `disk` |
+| `-w/--warning` | 80 | Warning threshold in percent |
+| `-c/--critical` | 90 | Critical threshold in percent |
+| `--exclude-mounts` | — | `disk` mode only: comma-separated list of mount paths to exclude (e.g. `/dev/shm,/boot`) |
+
+**Usage:**
+```bash
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> -t <timeout in seconds> --mode <cpu|memory|swap|disk>
+```
+
+**Output example:**
+```
+OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;80.0;90.0;0;100
+OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;80.0;90.0;0;100
+OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;80.0;90.0;0;100
+OK - Disk usage (worst: /=51.8%): /=51.8%, /Volume=42.9%, /var=42.9%, /boot=34.4%, /dev/shm=0.0% | disk=51.8%;80.0;90.0;0;100 ...
+```
+
+**Requirements:** `pysnmp`
+
+---
+
 ## Exit Codes (all monitoring scripts)
 
 | Code | Status |
@@ -216,108 +292,3 @@ check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_pa
 | 1 | WARNING |
 | 2 | CRITICAL |
 | 3 | UNKNOWN |
-# wpp-service-checks-python
-
-Nagios/Icinga-style Python check plugins for monitoring Cisco network devices (via SNMP) and VMware ESXi/vCenter (via the vSphere API).
-
-All checks follow the standard Nagios plugin exit code convention:
-
-| Code | Status   |
-|------|----------|
-| 0    | OK       |
-| 1    | WARNING  |
-| 2    | CRITICAL |
-| 3    | UNKNOWN  |
-
-Most scripts print a single-line summary followed by `| perfdata` performance data. Pass `--multiline` for a more verbose, human-readable breakdown.
-
-## Requirements
-
-- Python 3 (scripts target the RHEL `rh-python38` SCL interpreter via their shebang; adjust as needed for your environment)
-- [`pysnmp`](https://pypi.org/project/pysnmp/) — used by the pysnmp-based helpers in `ves_snmp_utils.py`
-- Net-SNMP CLI tools (`snmpwalk`, `snmpget`) — used by the subprocess-based helpers in `ves_snmp_utils.py`
-- [`pyvmomi`](https://pypi.org/project/pyvmomi/) (`pyVim`, `pyVmomi`) — required only by [check_ves_vmware_esx_listvms.py](check_ves_vmware_esx_listvms.py)
-- [`check_nwc_health`](https://labs.consol.de/nagios/check_nwc_health/) installed at `/usr/local/nagios/libexec/check_nwc_health` — required by [check_ves_interface.py](check_ves_interface.py) and [check_ves_licenses.py](check_ves_licenses.py)
-
-Install the Python dependencies with:
-
-```bash
-pip install pysnmp pyvmomi
-```
-
-## Shared module: `ves_snmp_utils.py`
-
-[ves_snmp_utils.py](ves_snmp_utils.py) provides the common building blocks used by the `check_ves_*` scripts:
-
-- **Subprocess-based SNMP** (shells out to `snmpwalk`/`snmpget`): `run_snmpwalk()`, `run_snmpwalk_lines()`, `run_snmpwalk_host()`, `parse_snmp_string_output()`
-- **pysnmp library-based SNMP**: `pysnmp_get()`, `pysnmp_walk()`, `pysnmp_walk_dict()`, `pysnmp_walk_indexed()`, `pysnmp_walk_multi_indexed()`, `snmp_value_to_str()`
-- **Common helpers**: `add_snmp_args()` (adds the standard SNMPv2c/v3 CLI arguments to an `argparse` parser), `is_auth_error()`, the `OIDS` dictionary of well-known Cisco/MIB-II OIDs, and the `NAGIOS_STATUS` / `CISCO_ENV_STATE_MAP` lookup tables
-
-All SNMP-based checks support both SNMPv2c and SNMPv3 and will automatically fall back from v3 to v2c (or vice versa) when credentials for both are supplied.
-
-### Common SNMP arguments (`add_snmp_args`)
-
-| Argument      | Description                                                        |
-|---------------|---------------------------------------------------------------------|
-| `--hostname`  | Target device hostname or IP (required)                             |
-| `--community` | SNMPv2c community string                                            |
-| `--user`      | SNMPv3 username                                                     |
-| `--seclevel`  | SNMPv3 security level: `noAuthNoPriv`, `authNoPriv`, `authPriv` (default `authPriv`) |
-| `--auth`      | SNMPv3 auth protocol (default `sha`)                                 |
-| `--authpw`    | SNMPv3 auth password                                                 |
-| `--priv`      | SNMPv3 privacy protocol (default `aes`)                              |
-| `--privpw`    | SNMPv3 privacy password                                              |
-| `--timeout`   | SNMP timeout in seconds (default varies by script)                   |
-| `--multiline` | Print verbose, multi-line output instead of a single summary line    |
-
-### [check_cisco_firewall.py](check_cisco_firewall.py)
-Checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status.
-
-```bash
-./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--peer-hostname <host>] [-w/--warning <n>] [-c/--critical <n>]
-```
-
-| Mode                 | Description                                                              |
-|----------------------|---------------------------------------------------------------------------|
-| `ha_summary`          | HA state of both the primary and secondary units (`cfwHardwareStatusValue`) |
-| `ha_pair`             | Cross-checks HA state by independently querying both `--hostname` and `--peer-hostname`, requiring both reachable, in agreement, and in a failover-safe state (9/10) |
-| `cpu`                 | Average CPU load (5s/1m/5m); `--warning`/`--critical` are percent (default 80/90) |
-| `memory`              | System/data-plane memory pool usage; `--warning`/`--critical` are percent (default 80/90) |
-| `connections`         | Current in-use connection count, with peak count included in verbose output and perfdata; `--warning`/`--critical` are connection counts |
-| `uptime`              | Time since last reboot (`sysUpTime`); `--warning`/`--critical` are minimum seconds |
-| `primary_state`       | Numeric HA state of the primary unit (`cfwHardwareStatusValue` index 6), cross-checked against `cfwHardwareStatusDetail`'s text role - same result regardless of which paired unit's IP is queried |
-| `secondary_state`     | Numeric HA state of the secondary unit (`cfwHardwareStatusValue` index 7), cross-checked against `cfwHardwareStatusDetail`'s text role - same result regardless of which paired unit's IP is queried |
-| `sysinfo`             | Hardware description, hostname and chassis model (`sysDescr`, `sysName`, `entPhysicalModelName`) |
-| `hardware`            | Fan tray / power supply operational status |
-| `interfaces`          | Admin/oper status, link speed and error/discard counters of all real interfaces, excluding ASA-internal pseudo-interfaces |
-
-The `hardware` mode uses `CISCO-ENTITY-FRU-CONTROL-MIB` (fan tray/PSU status is not populated via `ENTITY-STATE-MIB` on these platforms) and returns `OK` with no fan/PSU components on units where it's not populated at all (e.g. a secondary logical FTD instance sharing chassis with another instance) — this is by design on some units, not a fault, so it does not alert. Below the summary line, it prints a table of every fan/PSU component (`Device Name | Device Voltage | Device RPM | Device Status`).
-
-The `interfaces` mode monitors every real interface reported via `ifName`/`ifAdminStatus`/`ifOperStatus`, excluding a small set of ASA-internal pseudo-interfaces (`Internal-Data0/1`, `nlp_int_tap`, etc.) — interface naming (`nameif`) varies significantly across firewall pairs, so no fixed interface list is used. Below the summary line, it prints a table (`Interface | Alias | Status | Speed | Errors(in/out) | Discards(in/out)`), one row per monitored interface, with DOWN interfaces sorted to the top and zero-valued error/discard counters shown as `-` to reduce noise; link speed and error/discard data is informational only and never affects the exit code or the UP/DOWN determination, though the raw counters are still summed across all interfaces into the perfdata as `errors_total`/`discards_total`. Both tables are `ljust`-padded *and* `|`-delimited between columns, so they stay aligned in a terminal/CLI while remaining unambiguous even if a frontend (e.g. Thruk) collapses repeated whitespace in the plugin's long output.
-
-`primary_state`/`secondary_state` report the HA pair's **configured role** (which unit is "primary" and which is "secondary" as set in the ASA HA config), not "this host" vs. "the other host" — the role assignment is fixed cluster-wide and is shared by both units' MIBs, so querying either paired unit's IP returns identical output for both modes. Output text says "Primary unit"/"Secondary unit" (never "local"/"peer") to avoid implying the result depends on which IP you queried. The numeric state reflects which of the two units is presently active vs. standby (this does change over time, e.g. after a failover), independent of the fixed primary/secondary role:
-
-| State | Meaning | Status |
-|-------|---------|--------|
-| 9     | Active           | OK |
-| 10    | Standby Ready    | OK |
-| 11    | Standby Cold     | WARNING |
-| 12    | Failed           | CRITICAL |
-
-So a healthy pair always shows one unit as Active (9) and the other as Standby Ready (10) — it does not matter whether the Active one is the primary or the secondary unit. These extended values (9-12) are seen on real devices but go beyond the standard `CISCO-FIREWALL-MIB` `HardwareStatus` textual convention (which only defines up to 10).
-
-`ha_summary`, `primary_state`, and `secondary_state` also best-effort identify whether the queried IP is itself the unit being reported on, via `_determine_unit_role()` (same helper `ha_pair` uses, below; omitted if the platform doesn't populate the underlying OID). `ha_summary` appends a trailing note, e.g. `[10.56.1.226 = primary unit, currently active]`. For `primary_state`/`secondary_state`, the numeric state is cross-checked against the text role (since both OIDs report the same active/standby fact) but that cross-check stays silent when they agree - only a genuine mismatch (or unavailable data) is called out, e.g. `` (MISMATCH: role text says '<text>') ``, which also forces CRITICAL. If the queried IP *is* the unit being reported on, a trailing `[queried unit is <role>]` is appended, e.g. `Primary unit: Active (9) [queried unit is primary]`. If it *isn't* (e.g. querying the primary unit's IP with `--mode secondary_state`), a leading `NOTE: <ip> is <role>; showing <primary/secondary> (peer) state - ` is prepended instead, so the caveat is read before the state data rather than after it.
-
-For `ha_pair`, `--peer-hostname` is optional: if omitted, the peer is guessed from `--hostname` using the environment's observed +/-2-last-octet IPv4 convention (e.g. `.226`/`.228`) and confirmed via a live SNMP query before being trusted; a confirmed auto-detected peer is noted in the output as `(peer <ip> auto-detected via IP heuristic)`. If no candidate can be confirmed (or `--hostname` isn't a plain IPv4 address), the check exits `WARNING` rather than guessing blindly.
-
-The `ha_pair` output also best-effort labels which IP is the Primary/Secondary unit, e.g. `Primary [10.56.1.226]: Active (9), Secondary [10.56.1.228]: Standby Ready (10)`. This uses `cfwHardwareInformation`, a self-referential text field (unlike the pair-mirrored `cfwHardwareStatusValue`/`Detail`) that includes `(this device)` only on the row matching the unit that actually answered the query. If the platform doesn't populate this OID, the IP labels are simply omitted rather than guessed.
-
-`ha_pair` also cross-checks that `--hostname` and the peer self-identify as **complementary** roles (one primary, one secondary) using the same `cfwHardwareInformation` text: matching numeric states alone isn't proof the two units are actually paired with each other, since an unrelated but individually-healthy unit would match too. If both sides self-identify as the same role, the check exits `CRITICAL` ("HA pair role mismatch") even though the numeric states agreed - this is the failure mode a misconfigured `--peer-hostname` (or a wrong IP-heuristic guess) would otherwise slip through as a false OK. If the role OID isn't populated on either side, this cross-check is skipped and the output notes "(role cross-check unavailable on this platform)".
-
-There is no SNMP OID that exposes a unit's peer IP address directly - confirmed by a full `snmpwalk` of a live device (nothing under `CISCO-FIREWALL-MIB`, no `IpAddress`-typed object, no CDP neighbor data) - so `ha_pair` has no way to auto-verify `--peer-hostname` itself is the *intended* pairing beyond the state-agreement and role-complementarity checks above; the `+/-2` last-octet heuristic (or an explicit, correct `--peer-hostname`) remains the only way to identify which IP to query.
-
-`--authpw`/`--privpw` can also be supplied via the `SNMP_AUTHPW`/`SNMP_PRIVPW` environment variables instead of as CLI flags, avoiding exposure of SNMPv3 credentials in the process list (`ps`/`/proc/<pid>/cmdline`); the CLI flag takes precedence if both are set.
-
-Both the `hardware` and `interfaces` tables can optionally be rendered as a real HTML `<table>` instead of plain ljust+pipe-delimited text by passing `--html-table` — only useful for a frontend that renders raw HTML in plugin output (e.g. Thruk with `cgi.cfg` `escape_html_tags=0`); leave it unset for CLI/SSH testing, where plain text stays readable. DOWN interfaces/not-OK components get a highlighted row background in the HTML table. All device-supplied SNMP strings (`ifAlias`, `entPhysicalDescr`, etc.) are HTML-escaped before being embedded, since that data isn't a trusted source.
-
-Running the script with no arguments prints usage/help and exits `UNKNOWN` instead of argparse's terse error. `--community`/`--user` credentials are required up front (`UNKNOWN` if neither is given). An SNMP timeout (unreachable host) is reported as `UNKNOWN` rather than `CRITICAL`, and any unexpected error or manual interruption (Ctrl+C) is caught and reported as a single-line `UNKNOWN` result instead of a raw Python traceback.

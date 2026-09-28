@@ -93,6 +93,15 @@ OIDS = {
     # ENTITY-STATE-MIB
     "entStateOper":           "1.3.6.1.2.1.131.1.1.1.7",
 
+    # HOST-RESOURCES-MIB — CPU load and storage (RAM/disk) tables, used on Linux-based
+    # appliances (e.g. FMC) instead of the IOS-only CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB
+    "hrProcessorLoad":        "1.3.6.1.2.1.25.3.3.1.2",
+    "hrStorageType":          "1.3.6.1.2.1.25.2.3.1.2",
+    "hrStorageDescr":         "1.3.6.1.2.1.25.2.3.1.3",
+    "hrStorageAllocationUnits": "1.3.6.1.2.1.25.2.3.1.4",
+    "hrStorageSize":          "1.3.6.1.2.1.25.2.3.1.5",
+    "hrStorageUsed":          "1.3.6.1.2.1.25.2.3.1.6",
+
     # CISCO-ENTITY-FRU-CONTROL-MIB — Fan tray / power supply operational status
     # (not populated by ENTITY-STATE-MIB on ASA/FTD/Secure Firewall platforms)
     "cefcFanTrayOperStatus":      "1.3.6.1.4.1.9.9.117.1.4.1.1.1",
