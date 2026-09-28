@@ -111,7 +111,7 @@ Usage percentage is computed per mount as `used_bytes / size_bytes * 100`; mount
 
 Perfdata publishes one metric per mount, e.g. `disk=51.8%;80.0;90.0;0;100 var=42.9%;... var_lib_mysql=42.9%;...` — the mount's descr is sanitized into a perfdata-safe label (`perfdata_name()`: non-alphanumeric characters replaced with `_`, e.g. `/var/lib/mysql` → `var_lib_mysql`; `/` alone becomes `disk`).
 
-With `-v/--verbose`, each mount in the summary also shows used/total MB, e.g. `/=51.8% (12345.6MB/23456.7MB)`, instead of just the bare percentage.
+Below the single Nagios summary/perfdata line, one plain line per mount is printed (sorted by usage, worst first), e.g. `/=51.8%`. With `-v/--verbose`, each of those lines also shows used/total MB, e.g. `/=51.8% (12345.6MB/23456.7MB)`, instead of just the bare percentage.
 
 ## Live validation
 
@@ -121,7 +121,16 @@ All OIDs and table structures in this document were confirmed against a real FMC
 OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;80.0;90.0;0;100
 OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;80.0;90.0;0;100
 OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;80.0;90.0;0;100
-OK - Disk usage (worst: /=51.8%): /=51.8%, /Volume=42.9%, /var=42.9%, /usr/local/sf=42.9%, /usr/lib64/perl=42.9%, /var/lib/mysql=42.9%, /var/lib/docker=42.9%, /boot=34.4%, /dev/shm=0.0% | disk=51.8%;80.0;90.0;0;100 ...
+OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
+/=51.8%
+/Volume=42.9%
+/var=42.9%
+/usr/local/sf=42.9%
+/usr/lib64/perl=42.9%
+/var/lib/mysql=42.9%
+/var/lib/docker=42.9%
+/boot=34.4%
+/dev/shm=0.0%
 ```
 
 `--exclude-mounts /dev/shm` and `-v/--verbose` (per-mount MB detail) were both confirmed live for `disk` mode. An invalid community string correctly times out to `UNKNOWN` (exit `3`) rather than a false CRITICAL/OK, since the plugin can't distinguish "device down" from "wrong credentials" via SNMP alone.

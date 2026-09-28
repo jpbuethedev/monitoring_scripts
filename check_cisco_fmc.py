@@ -169,11 +169,7 @@ def check_disk(args, warning, critical):
     exit_code = _threshold_exit_code(worst_pct, warning, critical)
     status = NAGIOS_STATUS[exit_code]
 
-    if args.verbose:
-        detail = ", ".join(f"{descr}={pct}% ({used_mb}MB/{total_mb}MB)" for descr, pct, used_mb, total_mb in mounts)
-    else:
-        detail = ", ".join(f"{descr}={pct}%" for descr, pct, _, _ in mounts)
-    summary = f"{status} - Disk usage (worst: {mounts[0][0]}={worst_pct}%): {detail}"
+    summary = f"{status} - Disk usage (worst: {mounts[0][0]}={worst_pct}%)"
 
     def perfdata_name(descr):
         return "".join(c if c.isalnum() else "_" for c in descr).strip("_") or "disk"
@@ -184,6 +180,11 @@ def check_disk(args, warning, critical):
         for descr, pct, _, _ in mounts
     )
     print(f"{summary} | {perf}")
+    for descr, pct, used_mb, total_mb in mounts:
+        if args.verbose:
+            print(f"{descr}={pct}% ({used_mb}MB/{total_mb}MB)")
+        else:
+            print(f"{descr}={pct}%")
     sys.exit(exit_code)
 
 

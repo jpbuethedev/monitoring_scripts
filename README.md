@@ -261,7 +261,7 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `-C/--community` | — | SNMPv2c community string |
 | `--user` | — | SNMPv3 username |
 | `-t/--timeout` | 30 | SNMP timeout in seconds |
-| `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to the summary |
+| `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to each mount's output line |
 | `--mode` | required | `cpu`, `memory`, `swap`, or `disk` |
 | `-w/--warning` | 80 | Warning threshold in percent |
 | `-c/--critical` | 90 | Critical threshold in percent |
@@ -277,7 +277,12 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;80.0;90.0;0;100
 OK - Physical memory usage: 61.0% (19588.5MB / 32116.2MB) | memory_used=61.0%;80.0;90.0;0;100
 OK - Swap space usage: 0.0% (0.0MB / 6725.8MB) | swap_used=0.0%;80.0;90.0;0;100
-OK - Disk usage (worst: /=51.8%): /=51.8%, /Volume=42.9%, /var=42.9%, /boot=34.4%, /dev/shm=0.0% | disk=51.8%;80.0;90.0;0;100 ...
+OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
+/=51.8%
+/Volume=42.9%
+/var=42.9%
+/boot=34.4%
+/dev/shm=0.0%
 ```
 
 **Requirements:** `pysnmp`
