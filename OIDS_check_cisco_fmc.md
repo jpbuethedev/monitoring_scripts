@@ -94,7 +94,7 @@ Live-confirmed on FMC: index `3` = "Virtual memory" (38842.0MB, RAM+swap combine
 ## disk
 Usage of every `hrStorageFixedDisk`-typed row (one per mounted filesystem); the worst (highest usage %) mount determines the overall exit code.
 
-Uses the same `hrStorageTable` columns as `memory` above (`hrStorageType`/`Descr`/`AllocationUnits`/`Size`/`Used`), filtered to rows where `hrStorageType == hrStorageFixedDisk` and `hrStorageSize > 0` (zero-size rows, e.g. unmounted/inactive entries, are skipped), and where the mount's `descr` is not listed in `--exclude-mounts` (a comma-separated list of exact mount paths, e.g. `--exclude-mounts /dev/shm,/boot`).
+Uses the same `hrStorageTable` columns as `memory` above (`hrStorageType`/`Descr`/`AllocationUnits`/`Size`/`Used`), filtered to rows where `hrStorageType == hrStorageFixedDisk` and `hrStorageSize > 0` (zero-size rows, e.g. unmounted/inactive entries, are skipped). If `--include-mounts` is provided, the row set is restricted to those exact mount names first; then any mount in `--exclude-mounts` is removed from the remaining set. This makes the allow-list/deny-list order explicit, e.g. `--include-mounts /,/var/log --exclude-mounts /dev/shm`.
 
 Live-confirmed on FMC: 9 fixed-disk mounts — `/`, `/boot`, `/Volume`, `/dev/shm`, `/var`, `/usr/local/sf`, `/usr/lib64/perl`, `/var/lib/mysql`, `/var/lib/docker`.
 
@@ -107,7 +107,7 @@ Usage percentage is computed per mount as `used_bytes / size_bytes * 100`; mount
 | Worst mount's usage % ≥ `--critical` (default `90`) | `2` CRITICAL |
 | Worst mount's usage % ≥ `--warning` (default `80`) | `1` WARNING |
 | Otherwise | `0` OK |
-| No fixed-disk rows found at all (or all excluded via `--exclude-mounts`) | `3` UNKNOWN |
+| No fixed-disk rows found at all (or all excluded via `--include-mounts`/`--exclude-mounts`) | `3` UNKNOWN |
 
 Perfdata publishes one metric per mount, e.g. `disk=51.8%;80.0;90.0;0;100 var=42.9%;... var_lib_mysql=42.9%;...` — the mount's descr is sanitized into a perfdata-safe label (`perfdata_name()`: non-alphanumeric characters replaced with `_`, e.g. `/var/lib/mysql` → `var_lib_mysql`; `/` alone becomes `disk`).
 
@@ -144,6 +144,6 @@ OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 /dev/shm=0.0%
 ```
 
-`--exclude-mounts /dev/shm` and `-v/--verbose` (per-mount MB detail) were both confirmed live for `disk` mode. An invalid community string correctly times out to `UNKNOWN` (exit `3`) rather than a false CRITICAL/OK, since the plugin can't distinguish "device down" from "wrong credentials" via SNMP alone.
+`--include-mounts`/`--exclude-mounts` and `-v/--verbose` (per-mount MB detail) were both confirmed live for `disk` mode, with the include filter applied before the exclude filter. An invalid community string correctly times out to `UNKNOWN` (exit `3`) rather than a false CRITICAL/OK, since the plugin can't distinguish "device down" from "wrong credentials" via SNMP alone.
 
 `check_cisco_firewall.py`'s generic `--mode uptime` and `--mode interfaces` (plain MIB-II, not ASA/FTD-specific) also work as-is against the FMC: `uptime` correctly reported the device's real uptime. `interfaces` correctly walked `ifOperStatus`/errors/discards, but flagged a Docker bridge interface (`br-6ca3564a94ae`) as CRITICAL/DOWN — a false positive if deployed against the FMC as-is; would need an interface-name exclude filter first.

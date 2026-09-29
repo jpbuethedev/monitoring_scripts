@@ -25,8 +25,8 @@
 #             hrStorageVirtualMemory; default 5/20; reports OK if no swap is configured
 #             (size 0)
 #   disk    - usage of every hrStorageTable entry of type hrStorageFixedDisk; the worst
-#             mount determines the overall status; default 80/90
-#             (default 80/90). --exclude-mounts drops named mounts from consideration.
+#             mount determines the overall status; default 80/90. --exclude-mounts
+#             drops named mounts from consideration.
 
 import argparse
 import os
@@ -65,6 +65,21 @@ def _threshold_exit_code(value, warning, critical):
     if warning is not None and value >= warning:
         return 1
     return 0
+
+
+def _resolve_thresholds(args):
+    default_warning, default_critical = MODE_DEFAULT_THRESHOLDS[args.mode]
+    warning = args.warning if args.warning is not None else default_warning
+    critical = args.critical if args.critical is not None else default_critical
+
+    if not 0 <= warning <= 100:
+        raise ValueError(f"--warning must be between 0 and 100 for --mode {args.mode} (got {warning})")
+    if not 0 <= critical <= 100:
+        raise ValueError(f"--critical must be between 0 and 100 for --mode {args.mode} (got {critical})")
+    if warning >= critical:
+        raise ValueError(f"--warning ({warning}) must be lower than --critical ({critical})")
+
+    return warning, critical
 
 
 def check_cpu(args, warning, critical):
@@ -164,12 +179,26 @@ def check_swap(args, warning, critical):
 
 def check_disk(args, warning, critical):
     entries = _read_storage_table(args)
-    excluded = {m.strip() for m in args.exclude_mounts.split(",") if m.strip()}
-    disks = [v for v in entries.values()
-             if v[0] == HR_STORAGE_TYPE_FIXED_DISK and v[3] > 0 and v[1] not in excluded]
+    all_disks = [v for v in entries.values() if v[0] == HR_STORAGE_TYPE_FIXED_DISK and v[3] > 0]
+
+    include_set = {m.strip() for m in args.include_mounts.split(",") if m.strip()}
+    exclude_set = {m.strip() for m in args.exclude_mounts.split(",") if m.strip()}
+
+    if include_set:
+        known_mounts = {v[1] for v in all_disks}
+        missing_includes = sorted(include_set - known_mounts)
+        if missing_includes and args.verbose:
+            print(f"WARNING - Ignoring unknown --include-mounts entries: {', '.join(missing_includes)}")
+        all_disks = [v for v in all_disks if v[1] in include_set]
+
+    missing_excludes = sorted(exclude_set - {v[1] for v in all_disks})
+    disks = [v for v in all_disks if v[1] not in exclude_set]
     if not disks:
         print("UNKNOWN - No fixed disk entries found (HOST-RESOURCES-MIB hrStorageTable not populated, or all excluded)")
         sys.exit(3)
+
+    if missing_excludes and args.verbose:
+        print(f"WARNING - Ignoring unknown --exclude-mounts entries: {', '.join(missing_excludes)}")
 
     mounts = []  # (descr, usage_pct, used_mb, total_mb)
     for _, descr, used_bytes, size_bytes in disks:
@@ -209,7 +238,7 @@ def main():
         "             [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )\n"
         "           [-t/--timeout <seconds>] [-v/--verbose]\n"
         "           --mode cpu|memory|swap|disk\n"
-        "           [-w/--warning <percent>] [-c/--critical <percent>] [--exclude-mounts <path>[,<path>...]]"
+        "           [-w/--warning <percent>] [-c/--critical <percent>] [--include-mounts <path>[,<path>...]] [--exclude-mounts <path>[,<path>...]]"
     )
     parser = argparse.ArgumentParser(
         usage=usage,
@@ -240,6 +269,8 @@ def main():
     parser.add_argument("-c", "--critical", type=float, default=None,
                         help="Critical threshold in percent (default varies by mode: "
                              "cpu 95, memory 97, swap 20, disk 90)")
+    parser.add_argument("--include-mounts", default="",
+                        help="Comma-separated list of mount paths to include in --mode disk before exclusions are applied (e.g. /,/var/log)")
     parser.add_argument("--exclude-mounts", default="",
                         help="Comma-separated list of mount paths to exclude from --mode disk (e.g. /dev/shm,/boot)")
 
@@ -257,9 +288,14 @@ def main():
         print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
         sys.exit(3)
 
-    default_warning, default_critical = MODE_DEFAULT_THRESHOLDS[args.mode]
-    warning = args.warning if args.warning is not None else default_warning
-    critical = args.critical if args.critical is not None else default_critical
+    try:
+        warning, critical = _resolve_thresholds(args)
+    except ValueError as exc:
+        print(f"UNKNOWN - {exc}")
+        sys.exit(3)
+
+    if args.verbose:
+        print(f"NOTE - Effective thresholds for {args.mode}: warning={warning}, critical={critical}")
 
     if args.mode == "cpu":
         check_cpu(args, warning, critical)

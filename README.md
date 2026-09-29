@@ -253,7 +253,7 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | **MIBs** | HOST-RESOURCES-MIB (`hrProcessorLoad`, `hrStorageTable`) |
 | **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
 | **Platform** | Cisco Secure Firewall Management Center (FMC) |
-| **Modes** | `cpu` (average CPU load across all reported cores; also escalates if any single core is at/above threshold even when the average isn't), `memory` (physical RAM usage), `swap` (virtual memory/swap usage; OK if no swap configured), `disk` (usage of every fixed-disk mount; worst one decides status; supports `--exclude-mounts`) |
+| **Modes** | `cpu` (average CPU load across all reported cores; also escalates if any single core is at/above threshold even when the average isn't), `memory` (physical RAM usage), `swap` (virtual memory/swap usage; OK if no swap configured), `disk` (usage of every fixed-disk mount; worst one decides status; supports `--include-mounts` and `--exclude-mounts`) |
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -265,7 +265,8 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `--mode` | required | `cpu`, `memory`, `swap`, or `disk` |
 | `-w/--warning` | mode-dependent | Warning threshold in percent (see table below) |
 | `-c/--critical` | mode-dependent | Critical threshold in percent (see table below) |
-| `--exclude-mounts` | — | `disk` mode only: comma-separated list of mount paths to exclude (e.g. `/dev/shm,/boot`) |
+| `--include-mounts` | — | `disk` mode only: comma-separated list of mount paths to include first; exclusions are then applied to the remaining set (e.g. `/,/var/log`) |
+| `--exclude-mounts` | — | `disk` mode only: comma-separated list of mount paths to exclude after the include filter (e.g. `/dev/shm,/boot`) |
 
 **Usage:**
 ```bash
@@ -285,7 +286,7 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk --exclude-mounts /dev/shm
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk --include-mounts /,/var,/var/lib/mysql --exclude-mounts /dev/shm
 ```
 
 **Output example:**
