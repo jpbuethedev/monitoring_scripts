@@ -13,7 +13,7 @@ Every mode maps its SNMP result onto the standard Nagios exit codes (`NAGIOS_STA
 | `2` | CRITICAL | Value(s) at/above `--critical` threshold |
 | `3` | UNKNOWN | SNMP error, missing/unpopulated OID, or no credentials given |
 
-All four modes share the same threshold logic (`_threshold_exit_code()`): critical takes precedence over warning, and both thresholds are percentages. Each mode has its own `--warning`/`--critical` default (see `MODE_DEFAULT_THRESHOLDS` in the code, and the "Default thresholds" section below) rather than a flat 80/90, since FMC's bursty CPU and by-design high RAM usage aren't fault indicators the same way swap usage is.
+The five metric modes share the same threshold logic (`_threshold_exit_code()`): critical takes precedence over warning. CPU/memory/swap/disk thresholds are percentages; timesync thresholds are seconds. Each metric mode has its own `--warning`/`--critical` default (see `MODE_DEFAULT_THRESHOLDS` in the code, and the "Default thresholds" section below). `sysinfo` is informational and does not accept thresholds.
 
 ## cpu
 Average CPU load across all reported processor cores, from HOST-RESOURCES-MIB's processor table.
@@ -113,6 +113,30 @@ Perfdata publishes one metric per mount, e.g. `disk=51.8%;80.0;90.0;0;100 var=42
 
 Below the single Nagios summary/perfdata line, one plain line per mount is printed (sorted by usage, worst first), e.g. `/=51.8%`. With `-v/--verbose`, each of those lines also shows used/total MB, e.g. `/=51.8% (12345.6MB/23456.7MB)`, instead of just the bare percentage.
 
+## timesync
+Clock skew between the FMC and the monitoring host, not NTP peer synchronization.
+
+| OID name | OID | Type |
+|---|---|---|
+| `hrSystemDate` | 1.3.6.1.2.1.25.1.2.0 | HOST-RESOURCES-MIB DateAndTime scalar with timezone |
+
+The check decodes the raw DateAndTime octets and compares the FMC timestamp with the midpoint of the local timestamps taken before and after the SNMP GET. The absolute difference drives OK/WARNING/CRITICAL using second-based thresholds (defaults 5/30), and `clock_skew` is published in seconds. The monitoring host must itself have an accurate clock. SNMP errors and missing, timezone-less, or malformed DateAndTime values return UNKNOWN rather than assuming synchronization.
+
+Live SNMP probing on `10.56.1.221` returned "No Such Object" for CISCO-NTP-MIB (`1.3.6.1.4.1.9.9.168`), NTPv4-MIB (`1.3.6.1.2.1.197`), and UCD-SNMP-MIB exec (`1.3.6.1.4.1.2021.8`). NET-SNMP-EXTEND-MIB reported zero extensions. A complete SNMP tree walk found `ntpd` and `ntpd.pl` processes but no NTP peer, offset, or synchronization-status values. `hrSystemDate` was populated with a timezone-qualified value matching the jump-host clock to within about one second. Process presence and low clock skew are not proof of current NTP peer synchronization.
+
+## sysinfo
+Hostname, OS description and available chassis identity from SNMP. `sysName` and `sysDescr` must be populated; optional ENTITY-MIB hardware details show `unavailable` if the agent omits them.
+
+| OID name | OID | Purpose |
+|---|---|---|
+| `sysName` | 1.3.6.1.2.1.1.5.0 | Hostname |
+| `sysDescr` | 1.3.6.1.2.1.1.1.0 | System description / OS |
+| `entPhysicalClass` | 1.3.6.1.2.1.47.1.1.1.1.5 | Select chassis row (class 3) |
+| `entPhysicalModelName` | 1.3.6.1.2.1.47.1.1.1.1.13 | Chassis model at the selected index |
+| `entPhysicalSerialNum` | 1.3.6.1.2.1.47.1.1.1.1.11 | Chassis serial at the same index, if populated |
+
+Live SNMP probes against `10.56.1.221` found `sysName=ves-fmc` and chassis index `9` with model `FS-VMW-SW-K9`. The serial column is empty, including on the chassis row; the check reports `Serial: unavailable` rather than claiming a hardware serial number.
+
 ## Default thresholds
 
 Each mode has its own `--warning`/`--critical` default (see `MODE_DEFAULT_THRESHOLDS` in the code) rather than a flat 80/90, since FMC's actual behavior warrants different values per mode:
@@ -123,10 +147,11 @@ Each mode has its own `--warning`/`--critical` default (see `MODE_DEFAULT_THRESH
 | `memory` | 90 | 97 | FMC intentionally keeps physical RAM usage high (page cache/event buffers) — high usage alone isn't a fault, so tight thresholds here just cause noise. |
 | `swap` | 5 | 20 | FMC avoids swapping until RAM is genuinely exhausted, so any sustained swap usage is a meaningful sign of real memory pressure, unlike physical RAM usage. |
 | `disk` | 80 | 90 | Standard safety margin; combine with `--exclude-mounts /dev/shm` (tmpfs, not meaningful) and treat `/var`/`/var/lib/mysql` (event DB/logs) as the mounts that matter most if space is tight. |
+| `timesync` | 5 seconds | 30 seconds | Tolerates DateAndTime's one-second precision and SNMP latency; requires a synchronized monitoring host. |
 
 ## Live validation
 
-All OIDs and table structures in this document were confirmed against a real FMC device (`ves-fmc`, `10.56.1.221`) via manual `snmpget`/`snmpwalk` and then via full end-to-end runs of `check_cisco_fmc.py` for all four modes, e.g.:
+CPU, memory, swap, and disk OIDs and table structures in this document were confirmed against a real FMC device (`ves-fmc`, `10.56.1.221`) via manual `snmpget`/`snmpwalk` and then via full end-to-end runs of `check_cisco_fmc.py` for those four modes. The deployed test copy also returned `OK` for timesync (0.4s clock skew, exit 0) and sysinfo (hostname `ves-fmc`, model `FS-VMW-SW-K9`, serial unavailable, exit 0). Examples for the four resource modes:
 
 ```
 OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%, cpu196610=3%, cpu196611=4%) | cpu_avg=3.2%;85.0;95.0;0;100

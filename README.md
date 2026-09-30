@@ -250,10 +250,10 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | Feature | Detail |
 |---|---|
 | **Language** | Python 3 (`rh-python38` shebang) |
-| **MIBs** | HOST-RESOURCES-MIB (`hrProcessorLoad`, `hrStorageTable`) |
+| **MIBs** | HOST-RESOURCES-MIB (`hrProcessorLoad`, `hrStorageTable`, `hrSystemDate`), MIB-II and ENTITY-MIB (`sysinfo`) |
 | **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
 | **Platform** | Cisco Secure Firewall Management Center (FMC) |
-| **Modes** | `cpu` (average CPU load across all reported cores; also escalates if any single core is at/above threshold even when the average isn't), `memory` (physical RAM usage), `swap` (virtual memory/swap usage; OK if no swap configured), `disk` (usage of every fixed-disk mount; worst one decides status; supports `--include-mounts` and `--exclude-mounts`) |
+| **Modes** | `cpu` (average CPU load across all reported cores; also escalates if any single core is at/above threshold even when the average isn't), `memory` (physical RAM usage), `swap` (virtual memory/swap usage; OK if no swap configured), `disk` (usage of every fixed-disk mount; worst one decides status; supports `--include-mounts` and `--exclude-mounts`), `timesync` (clock skew vs monitoring host), `sysinfo` (hostname and available chassis identity) |
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -262,15 +262,17 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `--user` | — | SNMPv3 username |
 | `-t/--timeout` | 30 | SNMP timeout in seconds |
 | `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to each mount's output line |
-| `--mode` | required | `cpu`, `memory`, `swap`, or `disk` |
-| `-w/--warning` | mode-dependent | Warning threshold in percent (see table below) |
-| `-c/--critical` | mode-dependent | Critical threshold in percent (see table below) |
+| `--mode` | required | `cpu`, `memory`, `swap`, `disk`, `timesync`, or `sysinfo` |
+| `-w/--warning` | mode-dependent | Warning threshold in percent for resource modes, seconds for timesync; not used by sysinfo |
+| `-c/--critical` | mode-dependent | Critical threshold in percent for resource modes, seconds for timesync; not used by sysinfo |
 | `--include-mounts` | — | `disk` mode only: comma-separated list of mount paths to include first; exclusions are then applied to the remaining set (e.g. `/,/var/log`) |
 | `--exclude-mounts` | — | `disk` mode only: comma-separated list of mount paths to exclude after the include filter (e.g. `/dev/shm,/boot`) |
 
 **Usage:**
 ```bash
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> -t <timeout in seconds> --mode <cpu|memory|swap|disk>
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community> --mode <mode> [options]
+./check_cisco_fmc.py -H $HOSTADDRESS$ --user <user> --mode <mode> [SNMPv3 options]
+# Modes: cpu, memory, swap, disk, timesync, sysinfo
 ```
 
 **Default thresholds per mode** (used when `-w`/`-c` aren't given explicitly; tuned for FMC's Linux memory-caching behavior and burst-y CPU rather than a flat 80/90 for every mode):
@@ -281,13 +283,18 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `memory` | 90 | 97 | FMC intentionally keeps physical RAM usage high (page cache/event buffers) — high usage alone isn't a fault, so avoid tight thresholds here. |
 | `swap` | 5 | 20 | FMC avoids swapping until RAM is genuinely exhausted, so any sustained swap usage is a meaningful sign of real memory pressure. |
 | `disk` | 80 | 90 | Standard safety margin; combine with `--exclude-mounts /dev/shm` (tmpfs, not meaningful) and treat `/var`/`/var/lib/mysql` (event DB/logs) as the mounts that matter most if space is tight. |
+| `timesync` | 5 seconds | 30 seconds | Compares the FMC clock against the monitoring host; requires an accurate monitoring host clock. |
 
 ```bash
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap
 ./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk --include-mounts /,/var,/var/lib/mysql --exclude-mounts /dev/shm
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode timesync -w 5 -c 30
+./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode sysinfo
 ```
+
+`timesync` measures clock skew via `hrSystemDate`, not which NTP peer the FMC uses or whether its NTP daemon is synchronized. Live probes on `10.56.1.221` found no NTP peer/status MIB, but did find a populated system clock (timesync returned OK at 0.4s skew). `sysinfo` uses `sysName` and `sysDescr` plus the ENTITY-MIB chassis row: model `FS-VMW-SW-K9` was reported, but serial was empty and is shown as `unavailable`. Missing optional hardware data does not fail this informational mode; missing hostname/description returns UNKNOWN.
 
 **Output example:**
 ```

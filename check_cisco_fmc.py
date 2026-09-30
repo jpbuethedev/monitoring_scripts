@@ -3,15 +3,13 @@
 #
 # Nagios plugin to check a Cisco Secure Firewall Management Center (FMC) via SNMP.
 #
-# Usage: check_cisco_fmc.py -H/--hostname <network-component>
-#            ( -C/--community <snmp-community> | --user <snmpv3-user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]
-#              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
-#            [ -t/--timeout <seconds> ] [ -v/--verbose ]
-#            --mode cpu|memory|swap|disk
-#            [ -w/--warning <percent> ] [ -c/--critical <percent> ]
+# Usage: check_cisco_fmc.py -H HOST -C COMMUNITY --mode MODE [OPTIONS]
+#        check_cisco_fmc.py -H HOST --user USER --mode MODE [OPTIONS]
+# Modes: cpu, memory, swap, disk, timesync, sysinfo
+# Use -w/-c for thresholds (percent, or seconds for timesync); see --help for options.
 #
-# Modes (all via HOST-RESOURCES-MIB, since FMC is a Linux-based appliance rather than an
-# IOS/ASA platform - CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB are not applicable here).
+# Resource and clock modes use HOST-RESOURCES-MIB; sysinfo uses MIB-II and ENTITY-MIB.
+# FMC is Linux-based, so IOS/ASA-specific CPU and memory MIBs are not applicable here.
 # --warning/--critical default to different values per mode (see MODE_DEFAULT_THRESHOLDS
 # below) since FMC's bursty CPU and by-design high RAM usage aren't fault indicators on
 # their own, while swap usage is a much more meaningful memory-pressure signal:
@@ -27,18 +25,23 @@
 #   disk    - usage of every hrStorageTable entry of type hrStorageFixedDisk; the worst
 #             mount determines the overall status; default 80/90. --exclude-mounts
 #             drops named mounts from consideration.
+#   timesync - clock skew against the monitoring host via hrSystemDate; default 5/30
+#              seconds. Does not verify NTP peer/daemon synchronization.
+#   sysinfo - hostname, system description, chassis model and serial (if populated).
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import os
 import sys
-from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_walk_indexed, snmp_value_to_str
+from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
 
 # HOST-RESOURCES-TYPES hrStorageType values used to pick out RAM / swap / fixed-disk table rows
 HR_STORAGE_TYPE_RAM = "1.3.6.1.2.1.25.2.1.2"
 HR_STORAGE_TYPE_VIRTUAL_MEMORY = "1.3.6.1.2.1.25.2.1.3"
 HR_STORAGE_TYPE_FIXED_DISK = "1.3.6.1.2.1.25.2.1.4"
+ENT_PHYSICAL_CLASS_CHASSIS = 3
 
-# Default --warning/--critical percent per --mode, used when not given explicitly on the CLI.
+# Default --warning/--critical per --mode (percent, except seconds for timesync).
 # cpu/memory are looser since FMC's bursty CPU and by-design high RAM usage (page cache/event
 # buffers) aren't fault indicators on their own; swap is tighter since FMC avoids swapping
 # until RAM is genuinely exhausted, making it the more meaningful memory-pressure signal.
@@ -47,12 +50,21 @@ MODE_DEFAULT_THRESHOLDS = {
     "memory": (90.0, 97.0),
     "swap": (5.0, 20.0),
     "disk": (80.0, 90.0),
+    "timesync": (5.0, 30.0),
 }
 
 
 def _snmp_walk_or_exit(args, oid):
     """pysnmp_walk_indexed(), printing the Nagios status line and exiting the process on failure."""
     result, rc = pysnmp_walk_indexed(args, oid)
+    if rc != 0:
+        print(result)
+        sys.exit(rc)
+    return result
+
+
+def _snmp_get_or_exit(args, oid):
+    result, rc = pysnmp_get(args, oid)
     if rc != 0:
         print(result)
         sys.exit(rc)
@@ -68,14 +80,23 @@ def _threshold_exit_code(value, warning, critical):
 
 
 def _resolve_thresholds(args):
+    if args.mode == "sysinfo":
+        if args.warning is not None or args.critical is not None:
+            raise ValueError("--warning/--critical are not applicable to --mode sysinfo")
+        return None, None
+
     default_warning, default_critical = MODE_DEFAULT_THRESHOLDS[args.mode]
     warning = args.warning if args.warning is not None else default_warning
     critical = args.critical if args.critical is not None else default_critical
 
-    if not 0 <= warning <= 100:
-        raise ValueError(f"--warning must be between 0 and 100 for --mode {args.mode} (got {warning})")
-    if not 0 <= critical <= 100:
-        raise ValueError(f"--critical must be between 0 and 100 for --mode {args.mode} (got {critical})")
+    if args.mode == "timesync":
+        if not 0 <= warning < float("inf") or not 0 <= critical < float("inf"):
+            raise ValueError("--warning and --critical must be finite non-negative seconds for --mode timesync")
+    else:
+        if not 0 <= warning <= 100:
+            raise ValueError(f"--warning must be between 0 and 100 for --mode {args.mode} (got {warning})")
+        if not 0 <= critical <= 100:
+            raise ValueError(f"--critical must be between 0 and 100 for --mode {args.mode} (got {critical})")
     if warning >= critical:
         raise ValueError(f"--warning ({warning}) must be lower than --critical ({critical})")
 
@@ -231,14 +252,73 @@ def check_disk(args, warning, critical):
     sys.exit(exit_code)
 
 
+def check_timesync(args, warning, critical):
+    started = datetime.now(timezone.utc)
+    value, rc = pysnmp_get(args, OIDS["hrSystemDate"])
+    finished = datetime.now(timezone.utc)
+    if rc != 0:
+        print(value)
+        sys.exit(rc)
+
+    try:
+        octets = value.asOctets()
+        if len(octets) != 11 or octets[8] not in (ord("+"), ord("-")):
+            raise ValueError("hrSystemDate has no valid timezone")
+        year = (octets[0] << 8) | octets[1]
+        offset = timedelta(hours=octets[9], minutes=octets[10])
+        if octets[8] == ord("-"):
+            offset = -offset
+        if octets[7] > 9 or octets[9] > 13 or octets[10] > 59:
+            raise ValueError("hrSystemDate contains an invalid time component")
+        device_time = datetime(year, octets[2], octets[3], octets[4], octets[5],
+                               octets[6], octets[7] * 100000, tzinfo=timezone(offset))
+    except (AttributeError, TypeError, ValueError) as exc:
+        print(f"UNKNOWN - Invalid hrSystemDate: {exc}")
+        sys.exit(3)
+
+    midpoint = started + (finished - started) / 2
+    clock_offset = (device_time - midpoint).total_seconds()
+    skew = abs(clock_offset)
+    exit_code = _threshold_exit_code(skew, warning, critical)
+    direction = "ahead" if clock_offset >= 0 else "behind"
+    print(f"{NAGIOS_STATUS[exit_code]} - FMC clock skew vs monitoring host: {skew:.1f}s "
+          f"({direction}) | clock_skew={skew:.1f}s;{warning};{critical};0;")
+    sys.exit(exit_code)
+
+
+def check_sysinfo(args):
+    name = snmp_value_to_str(_snmp_get_or_exit(args, OIDS["sysName"])).strip()
+    descr = snmp_value_to_str(_snmp_get_or_exit(args, OIDS["sysDescr"])).strip()
+    if not name or not descr or name.startswith("No Such") or descr.startswith("No Such"):
+        print("UNKNOWN - Hostname or system description not available via SNMP")
+        sys.exit(3)
+
+    model = "unavailable"
+    serial = "unavailable"
+    classes, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalClass"])
+    if rc == 0:
+        chassis = next((idx for idx, value in classes.items()
+                        if int(value) == ENT_PHYSICAL_CLASS_CHASSIS), None)
+        if chassis is not None:
+            models, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalModelName"])
+            if rc == 0 and chassis in models:
+                model = snmp_value_to_str(models[chassis]).strip() or "unavailable"
+            serials, rc = pysnmp_walk_indexed(args, OIDS["entPhysicalSerialNum"])
+            if rc == 0 and chassis in serials:
+                serial = snmp_value_to_str(serials[chassis]).strip() or "unavailable"
+
+    print(f"OK - Hostname: {name}, Description: {descr}, Model: {model}, Serial: {serial}")
+    sys.exit(0)
+
+
 def main():
     usage = (
-        "%(prog)s -H/--hostname <host>\n"
-        "           ( -C/--community <community> | --user <user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]\n"
-        "             [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )\n"
-        "           [-t/--timeout <seconds>] [-v/--verbose]\n"
-        "           --mode cpu|memory|swap|disk\n"
-        "           [-w/--warning <percent>] [-c/--critical <percent>] [--include-mounts <path>[,<path>...]] [--exclude-mounts <path>[,<path>...]]"
+        "%(prog)s -H HOST -C COMMUNITY --mode MODE [OPTIONS]\n"
+        "       %(prog)s -H HOST --user USER --mode MODE [OPTIONS]\n"
+        "\n"
+        "Modes: cpu, memory, swap, disk, timesync, sysinfo\n"
+        "Thresholds: -w WARN -c CRIT (percent; seconds for timesync)\n"
+        "Disk filters: --include-mounts PATHS --exclude-mounts PATHS"
     )
     parser = argparse.ArgumentParser(
         usage=usage,
@@ -257,18 +337,20 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
     parser.add_argument("--mode", required=True, metavar="MODE",
-                        choices=["cpu", "memory", "swap", "disk"],
+                        choices=["cpu", "memory", "swap", "disk", "timesync", "sysinfo"],
                         help="A keyword which tells the plugin what to do\n"
                              "    cpu       (Average CPU load across all reported processors)\n"
                              "    memory    (Physical RAM usage)\n"
                              "    swap      (Virtual memory/swap usage)\n"
-                             "    disk      (Usage of every fixed disk/mount reported; worst one decides status)")
+                             "    disk      (Usage of every fixed disk/mount reported; worst one decides status)\n"
+                             "    timesync  (Clock skew vs monitoring host; does not verify NTP peers)\n"
+                             "    sysinfo   (Hostname, system description, chassis model and serial)")
     parser.add_argument("-w", "--warning", type=float, default=None,
-                        help="Warning threshold in percent (default varies by mode: "
-                             "cpu 85, memory 90, swap 5, disk 80)")
+                            help="Warning threshold in percent, or seconds for timesync (defaults: "
+                                "cpu 85, memory 90, swap 5, disk 80, timesync 5)")
     parser.add_argument("-c", "--critical", type=float, default=None,
-                        help="Critical threshold in percent (default varies by mode: "
-                             "cpu 95, memory 97, swap 20, disk 90)")
+                            help="Critical threshold in percent, or seconds for timesync (defaults: "
+                                "cpu 95, memory 97, swap 20, disk 90, timesync 30)")
     parser.add_argument("--include-mounts", default="",
                         help="Comma-separated list of mount paths to include in --mode disk before exclusions are applied (e.g. /,/var/log)")
     parser.add_argument("--exclude-mounts", default="",
@@ -305,7 +387,18 @@ def main():
         check_swap(args, warning, critical)
     elif args.mode == "disk":
         check_disk(args, warning, critical)
+    elif args.mode == "timesync":
+        check_timesync(args, warning, critical)
+    elif args.mode == "sysinfo":
+        check_sysinfo(args)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("UNKNOWN - Check interrupted")
+        sys.exit(3)
+    except Exception as e:
+        print(f"UNKNOWN - Unexpected error: {e}")
+        sys.exit(3)

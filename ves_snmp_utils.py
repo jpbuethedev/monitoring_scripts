@@ -95,6 +95,7 @@ OIDS = {
 
     # HOST-RESOURCES-MIB — CPU load and storage (RAM/disk) tables, used on Linux-based
     # appliances (e.g. FMC) instead of the IOS-only CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB
+    "hrSystemDate":           "1.3.6.1.2.1.25.1.2.0",
     "hrProcessorLoad":        "1.3.6.1.2.1.25.3.3.1.2",
     "hrStorageType":          "1.3.6.1.2.1.25.2.3.1.2",
     "hrStorageDescr":         "1.3.6.1.2.1.25.2.3.1.3",
