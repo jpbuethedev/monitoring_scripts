@@ -122,10 +122,10 @@ Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via
 
 **Usage:**
 ```bash
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community '<community>' --timeout 10
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --strict
-./check_cisco_wlc_ha.pl --host 172.26.9.68 --version 2c --community '<community>' --timeout 10 --ap-serial
+./check_cisco_wlc_ha.pl --host <WLC-IP> --version 3 --secname <SNMPv3-USER> --authpass '<AUTH-PASSWORD>' --privpass '<PRIVACY-PASSWORD>' --timeout 10
+./check_cisco_wlc_ha.pl --host <WLC-IP> --version 2c --community '<COMMUNITY>' --timeout 10
+./check_cisco_wlc_ha.pl --host <WLC-IP> --version 3 --secname <SNMPv3-USER> --authpass '<AUTH-PASSWORD>' --privpass '<PRIVACY-PASSWORD>' --strict
+./check_cisco_wlc_ha.pl --host <WLC-IP> --version 2c --community '<COMMUNITY>' --timeout 10 --ap-serial
 ```
 
 **Output example:**
