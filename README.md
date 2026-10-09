@@ -213,7 +213,7 @@ check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_pa
 
 ### `check_cisco_firewall.py`
 
-Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. Full OID/logic reference: [OIDS_check_cisco_firewall.md](OIDS_check_cisco_firewall.md).
+Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_firewall.md); for numeric OIDs and detailed state mappings, see [OIDS_check_cisco_firewall.md](OIDS_check_cisco_firewall.md).
 
 | Feature | Detail |
 |---|---|
