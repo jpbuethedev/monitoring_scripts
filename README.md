@@ -248,7 +248,7 @@ OK - Role=ACTIVE(active); HA Peer: reachable | peer_up=1
 
 ### `check_cisco_fmc.py`
 
-Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SNMP. FMC is a Linux (Yocto) appliance rather than an IOS/ASA platform, so it uses HOST-RESOURCES-MIB instead of the ASA-specific CISCO-PROCESS-MIB/CISCO-MEMORY-POOL-MIB. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. Full OID/logic reference: [OIDS_check_cisco_fmc.md](OIDS_check_cisco_fmc.md).
+Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SNMP. FMC is a Linux (Yocto) appliance rather than an IOS/ASA platform, so it uses HOST-RESOURCES-MIB instead of the ASA-specific CISCO-PROCESS-MIB/CISCO-MEMORY-POOL-MIB. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_fmc.md); for numeric OIDs, table details, and live-tested examples, see [OIDS_check_cisco_fmc.md](OIDS_check_cisco_fmc.md).
 
 | Feature | Detail |
 |---|---|
