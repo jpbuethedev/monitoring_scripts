@@ -316,6 +316,93 @@ OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 
 ---
 
+### `check_cisco_wlc.py`
+
+Lists Cisco WLC interfaces and checks interface health via IF-MIB and CISCO-RF-MIB using the shared [ves_snmp_utils.py](ves_snmp_utils.py) module. Supports SNMPv2c and SNMPv3.
+
+For the decision flow, rate formulas, numeric OIDs and limitations, see [How the WLC check works](LOGIC_check_cisco_wlc.md). This is a read-only Nagios/Naemon-compatible plugin for Cisco C9800 WLCs; it does not change interface configuration. Keep the script and shared helper in the same directory. The shebang uses `/opt/rh/rh-python38/root/usr/bin/python3`; direct execution requires executable permission and LF line endings.
+
+| Mode | Purpose | HA behavior |
+|---|---|---|
+| `list-interfaces` | Inventory of every reported interface, without link alarms | Lists the queried unit regardless of role |
+| `interface-health` | Enabled non-Null interfaces must be admin-up/oper-up | Evaluates active; explicitly skips standbyHot; other states are WARNING |
+| `interface-usage` | Sampled inbound/outbound rates and utilization alarms | Evaluates either unit; low traffic is not an error |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--hostname HOST` | Required | Target WLC hostname or IP; SNMP uses UDP port 161 |
+| `--mode MODE` | Required | One of the three modes above |
+| `--community VALUE` | Unset | SNMPv2c community; provide this or `--user` |
+| `--user USER` | Unset | SNMPv3 username; the helper tries v3 first and may fall back to v2c if a community is also supplied |
+| `--seclevel LEVEL` | `authPriv` | `noAuthNoPriv`, `authNoPriv` or `authPriv` |
+| `--auth PROTOCOL` | `sha` | Use `sha` or `md5` |
+| `--authpw VALUE` | Unset | Authentication password; `SNMP_AUTHPW` is the environment fallback |
+| `--priv PROTOCOL` | `aes` | Use `aes` or `des` |
+| `--privpw VALUE` | Unset | Privacy password; `SNMP_PRIVPW` is the environment fallback |
+| `--timeout SECONDS` | `5` | Positive integer timeout per SNMP request, not for the whole check |
+| `--interval SECONDS` | `5` | Usage only: finite sample delay of at least 1 second |
+| `-w/--warning PERCENT` | `80` | Usage only: warning starts at this utilization |
+| `-c/--critical PERCENT` | `90` | Usage only: critical starts at this utilization; requires `0 <= warning < critical <= 100` |
+| `--include-interfaces NAMES` | All eligible | Usage only: comma-separated exact, case-sensitive `ifName` or `ifDescr` matches |
+| `--multiline` | Off | Accepted by the shared parser; these modes always print their table on separate lines |
+| `-h/--help` | N/A | Shows options and detailed mode descriptions without querying SNMP |
+
+There are no `-H`/`-C` aliases. `--interval`, `-w` and `-c` affect only usage mode; `--include-interfaces` is rejected in other modes. Prefer environment variables over password options to avoid exposing SNMPv3 passwords in process listings. Explicit password options take precedence.
+
+```bash
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-interfaces
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-health
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --interval 5 -w 80 -c 90
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --include-interfaces Gi2
+./check_cisco_wlc.py --hostname <WLC-IP> --user <user> --mode list-interfaces
+```
+
+Examples for the observed pair (replace the community placeholder):
+
+```bash
+./check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode list-interfaces
+./check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode interface-health
+./check_cisco_wlc.py --hostname 172.23.36.13 --community '<community>' --mode interface-usage --include-interfaces Gi2
+./check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode interface-usage --include-interfaces GigabitEthernet2,Vlan2555 --interval 10 -w 70 -c 85
+./check_cisco_wlc.py --hostname 172.23.36.12 --user '<user>' --seclevel authPriv --mode interface-health
+```
+
+For the last example, set `SNMP_AUTHPW` and `SNMP_PRIVPW` in the execution environment. No password values are built into the plugin.
+
+`list-interfaces` prints every interface, including administratively disabled and virtual interfaces, as a pipe-delimited table: index, name, description, alias, admin state, operational state, and reported speed in Mbps. It is an informational inventory: down interfaces do not cause alerts, including interfaces on a standby WLC. A successful nonempty inventory returns OK; an empty inventory returns UNKNOWN. SNMP failures retain the shared helper's status. Performance data contains `interfaces_total` and `interfaces_up`.
+
+`interface-health` reads `cRFStatusUnitState` (`1.3.6.1.4.1.9.9.176.1.1.2.0`). On the active WLC (14), it ignores administratively down and Null interfaces, then returns CRITICAL if any remaining interface is not admin-up/oper-up. Missing or invalid status, or no eligible interfaces, returns UNKNOWN unless a confirmed interface failure already requires CRITICAL. Output includes a name/admin/oper table and `interfaces_checked`, `interfaces_problem`, `interfaces_unknown` perfdata. A standbyHot WLC (9) returns OK with an explicit evaluation-skipped message, not a claim that its links are healthy; other HA states return WARNING without evaluating links. SNMP failures retain the helper's status. This mode does not check traffic rates, error counters, or HA peer health.
+
+`interface-usage` samples `ifHCInOctets` and `ifHCOutOctets` twice, separated by `--interval` seconds (default 5, minimum 1), and calculates bits per second from the actual elapsed time for each direction. It lists inbound/outbound Mbps and utilization against `ifHighSpeed` for every admin-up non-Null interface, including VLAN interfaces. Each direction is compared separately, not added together; WARNING starts at `-w` (default 80%) and CRITICAL at `-c` (default 90%). The worst interface/direction determines status. This mode samples the queried unit even when it is standby; low traffic is not an error. VLAN speeds are device-reported logical capacities, not necessarily a physical bottleneck, and VLAN/physical traffic may overlap.
+
+Use `--include-interfaces Gi2` to evaluate only the physical uplink, or supply a comma-separated list such as `Gi2,Vl2555`. Matches are exact and case-sensitive against `ifName` or `ifDescr`, so `GigabitEthernet2` also works. Unknown names, explicitly selected disabled/Null interfaces, or an empty selection return UNKNOWN. The option applies only to `interface-usage`; without it, all eligible interfaces are evaluated. Unselected interfaces do not contribute rate errors or perfdata, although SNMP walks still read whole columns.
+
+Counter decreases, changes in `ifCounterDiscontinuityTime`, uptime resets, missing counters or unknown speed prevent a valid rate and return UNKNOWN, unless another interface already requires CRITICAL. There is no 32-bit counter fallback. Perfdata uses stable interface-index labels (`if2_in_bps`, `if2_out_bps`, `if2_in_pct`, `if2_out_pct`). Sampling takes at least `--interval` plus SNMP request time; configure the monitoring system's overall plugin timeout accordingly. Calculations have synthetic test coverage. User-supplied live output confirmed valid Gi2 rates on both WLCs and valid Vl2555 rates on `.12`; `.13` returned UNKNOWN because a Vl2555 counter decreased. The cause of that decrease has not been established.
+
+`--timeout` defaults to 5 seconds per SNMP request. SNMPv3 passwords can also be supplied through `SNMP_AUTHPW` and `SNMP_PRIVPW`. Requires Python 3.8 and `pysnmp`, like the other Python checks.
+
+| Output/perfdata | Meaning |
+|---|---|
+| Inventory: `interfaces_total`, `interfaces_up` | Interface count and count whose operational state is up, including virtual interfaces |
+| Health: `interfaces_checked`, `interfaces_problem`, `interfaces_unknown` | Evaluated valid-status rows, non-up rows, and missing/invalid-status rows; standby skip only emits `interfaces_checked=0` |
+| Usage: `ifN_in_bps`, `ifN_out_bps` | Bits per second for interface index N; no unit suffix, values are bps |
+| Usage: `ifN_in_pct`, `ifN_out_pct` | Percent of reported interface capacity, with warning/critical thresholds |
+
+The first line contains the status and perfdata after `|`. Subsequent pipe-delimited rows are long plugin output, not additional perfdata. Usage rows show Mbps rounded to three decimals and percentages to two; status uses unrounded values. Interface-index metric labels are consistent within the reported inventory but may change if the device renumbers interfaces.
+
+| Exit | Conditions |
+|---|---|
+| `0` OK | Nonempty inventory; healthy active links; explicit standbyHot health skip; valid usage below warning |
+| `1` WARNING | Transitional/unexpected health-mode HA state, or usage at/above warning but below critical |
+| `2` CRITICAL | Confirmed active-interface health failure, usage at/above critical, or a helper-reported SNMP failure classified as critical |
+| `3` UNKNOWN | Empty/unevaluable data, invalid request, SNMP timeout, counter/reset/speed issues, or an unexpected exception |
+
+If a usage row cannot be evaluated, the result is UNKNOWN even when another row is WARNING; a confirmed CRITICAL row takes precedence. Request/uptime/SNMP failures that abort sampling return immediately. Missing required command-line options or invalid argparse values use argparse's own error/exit 2, not a Nagios UNKNOWN summary. No arguments prints help and exits 3.
+
+Troubleshooting: use `list-interfaces` to find exact names; use `--include-interfaces Gi2` when intentionally monitoring only the uplink; retain UNKNOWN handling for counters that decrease. A health-mode standby skip does not certify physical links or HA peer health. A successful SNMP walk or low usage does not prove forwarding is healthy. See the LOGIC guide for the observed `.13` VLAN counter issue and validation scope. NTP monitoring remains a separate [plugin](check_cisco_wlc_ntp.py).
+
+---
+
 ### `check_cisco_wlc_ntp.py`
 
 Python plugin that checks the NTP synchronization state of a Cisco C9800 WLC via the standard NTPv4-MIB (`1.3.6.1.2.1.197`). Reports the device's own sync mode, stratum, active offset and per-peer stratum, so an unsynchronized WLC is flagged CRITICAL. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_wlc_ntp.md).
