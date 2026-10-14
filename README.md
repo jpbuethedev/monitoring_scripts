@@ -318,20 +318,40 @@ OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 
 ### `check_cisco_wlc.py`
 
-Lists Cisco WLC interfaces and checks interface health via IF-MIB and CISCO-RF-MIB using the shared [ves_snmp_utils.py](ves_snmp_utils.py) module. Supports SNMPv2c and SNMPv3.
+Lists Cisco WLC interfaces, component serial numbers and Smart Licensing entitlements, and checks interface/license health and traffic usage via IF-MIB, ENTITY-MIB, CISCO-RF-MIB and CISCO-SMART-LIC-MIB using the shared [ves_snmp_utils.py](ves_snmp_utils.py) module. Supports SNMPv2c and SNMPv3.
+
+**Live software-version discovery (2026-10-14):** both `172.23.36.12` and `172.23.36.13` reported C9800-CL IOS-XE `17.15.6`, release build `fc2`, compiled `22-Jul-2026 03:38`. ENTITY-MIB reported component software revision `17.15.06` on `module R0` (index 20) and `module F0` (index 40) on both units. The leading zero is a formatting difference, not evidence of another release. Firmware revisions were empty except for `Unknown` on F0; they do not identify the running IOS-XE version.
+
+| Version source | OID | Interpretation |
+|---|---|---|
+| `sysDescr.0` | `1.3.6.1.2.1.1.1.0` | Running software description, version and build |
+| `entPhysicalSoftwareRev` | `1.3.6.1.2.1.47.1.1.1.1.10` | Component software revisions; join to `entPhysicalName` by entity index |
+| `entPhysicalFirmwareRev` | `1.3.6.1.2.1.47.1.1.1.1.9` | Component firmware; empty/Unknown is unavailable, not an IOS-XE version |
+
+Manual read-only verification (run from a host with Net-SNMP and device access):
+
+```bash
+snmpget -v2c -c '<community>' 172.23.36.12 1.3.6.1.2.1.1.1.0
+snmpwalk -v2c -c '<community>' 172.23.36.12 1.3.6.1.2.1.47.1.1.1.1.10
+```
+
+Repeat with `.13` to check the second unit. These are discovery results, not a `--mode` implemented by this plugin; there is no version-comparison, upgrade-compliance or version-mismatch alarm. Both units also reported the same `sysName`, so identify query results by target IP, not hostname alone.
 
 For the decision flow, rate formulas, numeric OIDs and limitations, see [How the WLC check works](LOGIC_check_cisco_wlc.md). This is a read-only Nagios/Naemon-compatible plugin for Cisco C9800 WLCs; it does not change interface configuration. Keep the script and shared helper in the same directory. The shebang uses `/opt/rh/rh-python38/root/usr/bin/python3`; direct execution requires executable permission and LF line endings.
 
 | Mode | Purpose | HA behavior |
 |---|---|---|
 | `list-interfaces` | Inventory of every reported interface, without link alarms | Lists the queried unit regardless of role |
+| `list-serial-numbers` | Inventory of components with nonempty ENTITY-MIB serial numbers | Lists all serial-bearing entities exposed by the queried unit, possibly including its peer |
+| `list-licenses` | Smart Licensing entitlement inventory; OK is not compliance certification | Empty tables are skipped only on freshly confirmed standbyHot |
+| `license-health` | Checks enablement and entitlement enforcement states | Populated tables evaluated on either unit; same empty-standby exception |
 | `interface-health` | Enabled non-Null interfaces must be admin-up/oper-up | Evaluates active; explicitly skips standbyHot; other states are WARNING |
 | `interface-usage` | Sampled inbound/outbound rates and utilization alarms | Evaluates either unit; low traffic is not an error |
 
 | Parameter | Default | Description |
 |---|---|---|
 | `--hostname HOST` | Required | Target WLC hostname or IP; SNMP uses UDP port 161 |
-| `--mode MODE` | Required | One of the three modes above |
+| `--mode MODE` | Required | One of the six modes above |
 | `--community VALUE` | Unset | SNMPv2c community; provide this or `--user` |
 | `--user USER` | Unset | SNMPv3 username; the helper tries v3 first and may fall back to v2c if a community is also supplied |
 | `--seclevel LEVEL` | `authPriv` | `noAuthNoPriv`, `authNoPriv` or `authPriv` |
@@ -351,6 +371,9 @@ There are no `-H`/`-C` aliases. `--interval`, `-w` and `-c` affect only usage mo
 
 ```bash
 ./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-interfaces
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-serial-numbers
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-licenses
+./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode license-health
 ./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-health
 ./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --interval 5 -w 80 -c 90
 ./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --include-interfaces Gi2
@@ -369,6 +392,10 @@ Examples for the observed pair (replace the community placeholder):
 
 For the last example, set `SNMP_AUTHPW` and `SNMP_PRIVPW` in the execution environment. No password values are built into the plugin.
 
+`list-serial-numbers` walks ENTITY-MIB serial numbers and joins component name, description, class and model by entity index. Empty/whitespace-only serials are omitted; repeated serials remain separate rows because they can represent different components. A nonempty result returns OK and `serial_components=<count>`; no serials returns UNKNOWN. Missing metadata rows use fallback labels, but SNMP operation failures retain the shared helper's status. The table is `Index | Component | Class | Model | Serial number | Description`. No fixed chassis index or local/peer identity is assumed, and `--include-interfaces` does not apply.
+
+Live walks on `.12` found local chassis serial `94XUH16ISL6` at index 1, module R0 serial `JAB1303001C` at index 20, and `Chassis 2` serial `9UFX9AYELRJ` at index 23. `.13` reported `9UFX9AYELRJ` at chassis index 1 and the same R0 serial at index 20. The second chassis matches `.13`, consistent with peer inventory, but the plugin reports device labels rather than inferring ownership. The repeated R0 serial does not uniquely identify a controller. Mode output was replay-tested against these live values; the new mode itself has not yet been run live.
+
 `list-interfaces` prints every interface, including administratively disabled and virtual interfaces, as a pipe-delimited table: index, name, description, alias, admin state, operational state, and reported speed in Mbps. It is an informational inventory: down interfaces do not cause alerts, including interfaces on a standby WLC. A successful nonempty inventory returns OK; an empty inventory returns UNKNOWN. SNMP failures retain the shared helper's status. Performance data contains `interfaces_total` and `interfaces_up`.
 
 `interface-health` reads `cRFStatusUnitState` (`1.3.6.1.4.1.9.9.176.1.1.2.0`). On the active WLC (14), it ignores administratively down and Null interfaces, then returns CRITICAL if any remaining interface is not admin-up/oper-up. Missing or invalid status, or no eligible interfaces, returns UNKNOWN unless a confirmed interface failure already requires CRITICAL. Output includes a name/admin/oper table and `interfaces_checked`, `interfaces_problem`, `interfaces_unknown` perfdata. A standbyHot WLC (9) returns OK with an explicit evaluation-skipped message, not a claim that its links are healthy; other HA states return WARNING without evaluating links. SNMP failures retain the helper's status. This mode does not check traffic rates, error counters, or HA peer health.
@@ -379,11 +406,47 @@ Use `--include-interfaces Gi2` to evaluate only the physical uplink, or supply a
 
 Counter decreases, changes in `ifCounterDiscontinuityTime`, uptime resets, missing counters or unknown speed prevent a valid rate and return UNKNOWN, unless another interface already requires CRITICAL. There is no 32-bit counter fallback. Perfdata uses stable interface-index labels (`if2_in_bps`, `if2_out_bps`, `if2_in_pct`, `if2_out_pct`). Sampling takes at least `--interval` plus SNMP request time; configure the monitoring system's overall plugin timeout accordingly. Calculations have synthetic test coverage. User-supplied live output confirmed valid Gi2 rates on both WLCs and valid Vl2555 rates on `.12`; `.13` returned UNKNOWN because a Vl2555 counter decreased. The cause of that decrease has not been established.
 
+`list-licenses` reads CISCO-SMART-LIC-MIB (`1.3.6.1.4.1.9.9.831`), listing feature, entitlement tag, requested quantity and decoded enforcement state. It returns OK for a complete inventory even if the displayed state is noncompliant. Smart Licensing disabled is reported as OK (inventory only), without walking entitlements. Missing/invalid required data is UNKNOWN. Feature names may be absent and fall back to the entitlement tag. Quantities are requested amounts, not purchased totals or remaining capacity.
+
+`license-health` uses the same table but evaluates enablement and enforcement states:
+
+| Licensing condition | Health result |
+|---|---|
+| Smart Licensing disabled; outOfCompliance (4); evaluationExpired (7); authorizationExpired (8); gracePeriodExpired (9); disabled (10); invalidTag (12); notAuthorized (13) | CRITICAL |
+| initialized (1), waiting (2), evaluationPeriod (6) | WARNING |
+| authorized (3), overage (5), reservedAuthorized (11), inUse (15) | OK |
+| notInUse (16) with requested quantity 0 | OK |
+| notApplicable (14), notInUse with a nonzero requested quantity, unknown state, incomplete/invalid required data | UNKNOWN unless another row is CRITICAL |
+
+Overage is acceptable because the MIB defines it as permitted overage that remains compliant, not the same as outOfCompliance. Inventory does not apply these health alarms. Neither mode certifies subscription validity, checks purchased entitlements in CSSM, or discovers expiry dates/remaining capacity; the tested expiry/count OIDs are absent on both WLCs. This is enforcement-state monitoring, not a full licensing audit.
+
+When Smart Licensing is enabled and all entitlement columns are empty, both modes query the current local HA role. Only `standbyHot` (9) returns OK with an explicit skipped message; an active, transitional, unavailable or invalid role returns UNKNOWN. SNMP errors retain helper status and are never converted into a successful standby skip. Populated standby tables are evaluated normally, and partial tables cannot use the empty-table exception. No extra license thresholds are supported; `-w/-c` remain traffic-only and `--include-interfaces` remains usage-only.
+
+Replayed output using `.12`'s live-discovered entitlements:
+
+```text
+OK - Smart Licensing enabled; 2 entitlements found; 0 problem(s), 0 unknown | license_entitlements=2 license_checked=2 license_problem=0 license_unknown=0
+Feature | Entitlement tag | Requested quantity | Enforcement status
+air-network-essentials | DNA_NWSTACK_E | 1 | authorized(3)
+air-dna-essentials | AIR-DNA-E | 1 | authorized(3)
+```
+
+With `.13`'s empty table and a confirmed standbyHot role:
+
+```text
+OK - Smart Licensing enabled; no local entitlements exposed on standbyHot; license-health evaluation skipped | license_entitlements=0 license_checked=0
+```
+
+The Smart Licensing fields were walked live; the new modes were replay/synthetic-tested, not yet executed live. A skip does not establish that the active peer is compliant: query that unit separately.
+
 `--timeout` defaults to 5 seconds per SNMP request. SNMPv3 passwords can also be supplied through `SNMP_AUTHPW` and `SNMP_PRIVPW`. Requires Python 3.8 and `pysnmp`, like the other Python checks.
 
 | Output/perfdata | Meaning |
 |---|---|
 | Inventory: `interfaces_total`, `interfaces_up` | Interface count and count whose operational state is up, including virtual interfaces |
+| Serial inventory: `serial_components` | Count of component rows with nonempty serials, not a count of unique serial strings |
+| Licenses: `license_entitlements`, `license_checked` | Rows exposed across queried columns and structurally valid rows (including known but indeterminate health states) |
+| Licenses: `license_problem`, `license_unknown` | WARNING/CRITICAL health rows and unavailable/indeterminate rows; inventory does not count compliance problems |
 | Health: `interfaces_checked`, `interfaces_problem`, `interfaces_unknown` | Evaluated valid-status rows, non-up rows, and missing/invalid-status rows; standby skip only emits `interfaces_checked=0` |
 | Usage: `ifN_in_bps`, `ifN_out_bps` | Bits per second for interface index N; no unit suffix, values are bps |
 | Usage: `ifN_in_pct`, `ifN_out_pct` | Percent of reported interface capacity, with warning/critical thresholds |
@@ -392,9 +455,9 @@ The first line contains the status and perfdata after `|`. Subsequent pipe-delim
 
 | Exit | Conditions |
 |---|---|
-| `0` OK | Nonempty inventory; healthy active links; explicit standbyHot health skip; valid usage below warning |
-| `1` WARNING | Transitional/unexpected health-mode HA state, or usage at/above warning but below critical |
-| `2` CRITICAL | Confirmed active-interface health failure, usage at/above critical, or a helper-reported SNMP failure classified as critical |
+| `0` OK | Complete inventory, disabled licensing in inventory mode, acceptable health results, explicit standby skips, or usage below warning |
+| `1` WARNING | Transitional interface-health HA state, license-health warning state, or usage at/above warning but below critical |
+| `2` CRITICAL | Confirmed interface/license health failure, usage at/above critical, or a helper-reported SNMP failure classified as critical |
 | `3` UNKNOWN | Empty/unevaluable data, invalid request, SNMP timeout, counter/reset/speed issues, or an unexpected exception |
 
 If a usage row cannot be evaluated, the result is UNKNOWN even when another row is WARNING; a confirmed CRITICAL row takes precedence. Request/uptime/SNMP failures that abort sampling return immediately. Missing required command-line options or invalid argparse values use argparse's own error/exit 2, not a Nagios UNKNOWN summary. No arguments prints help and exits 3.

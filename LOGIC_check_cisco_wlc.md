@@ -2,7 +2,7 @@
 
 ## In plain language
 
-[check_cisco_wlc.py](check_cisco_wlc.py) reads interface inventory, link states and traffic counters from a Cisco C9800 WLC using [ves_snmp_utils.py](ves_snmp_utils.py). It never changes the device. The three modes answer different questions: what interfaces exist, whether enabled links on the active controller are up, and how much reported capacity traffic uses. These are not end-to-end forwarding or wireless client tests.
+[check_cisco_wlc.py](check_cisco_wlc.py) reads interface inventory, component serial numbers, link states, traffic counters and Smart Licensing data from a Cisco C9800 WLC using [ves_snmp_utils.py](ves_snmp_utils.py). It never changes the device. The six modes separate inventory from health evaluation for interfaces and licenses. These are not end-to-end forwarding, wireless client or subscription-validity tests.
 
 For options and invocation examples, see the [README](README.md). NTP synchronization remains in [check_cisco_wlc_ntp.py](check_cisco_wlc_ntp.py).
 
@@ -23,6 +23,75 @@ The check walks names, descriptions, aliases, admin state, operational state and
 The table columns are `Index | Name | Description | Alias | Admin | Oper | Speed (Mbps)`. Missing names fall back to descriptions; empty descriptions/aliases display `-`. Missing states display `unavailable`; unrecognized numeric states display `unknown(number)`. Missing/zero speed displays `unavailable`. Malformed numeric values may instead trigger the top-level UNKNOWN handler.
 
 `interfaces_total` counts inventory indices. `interfaces_up` counts operational-up rows in that inventory, irrespective of admin state or interface type. Neither metric is an alarm threshold.
+
+## Serial inventory: list-serial-numbers
+
+Walk `entPhysicalSerialNum`, normalize text and discard empty/whitespace-only values. No serial-bearing rows means UNKNOWN. Otherwise, walk names, descriptions, models and classes and join them by entity index. Sort output numerically by index, not by serial or name. Repeated serials are not deduplicated.
+
+The table is `Index | Component | Class | Model | Serial number | Description`. A missing component name falls back to its description, then `entity <index>`. Missing models/classes display `unavailable`; missing descriptions display `-`. ENTITY-MIB class 3 is chassis, 9 is module and 12 is CPU. Other standard classes are also labeled; unrecognized numeric classes display `unknown(number)`. SNMP failures retain helper status and malformed values may trigger the top-level UNKNOWN handler.
+
+Successful enumeration returns OK with `serial_components` counting rows, not distinct serial strings. It is inventory only, not a serial-change alarm or expected-device comparison. It does not hard-code chassis index 1, filter only chassis, assume that all entities belong to the queried controller, or apply `--include-interfaces`.
+
+Live walks found `94XUH16ISL6` on `.12` chassis index 1 and `9UFX9AYELRJ` on `.13` chassis index 1. `.12` also exposed index 23 named `Chassis 2` with `.13`'s serial. This is consistent with peer inventory; ownership is not inferred in code. Both exposed R0 serial `JAB1303001C`, so that module serial is not a unique controller identifier. Replay tests covered both datasets, empty serials, duplicate serial strings and missing metadata. The new mode has not yet been run live.
+
+| ENTITY-MIB object | Column OID |
+|---|---|
+| entPhysicalSerialNum | `1.3.6.1.2.1.47.1.1.1.1.11` |
+| entPhysicalName | `1.3.6.1.2.1.47.1.1.1.1.7` |
+| entPhysicalDescr | `1.3.6.1.2.1.47.1.1.1.1.2` |
+| entPhysicalModelName | `1.3.6.1.2.1.47.1.1.1.1.13` |
+| entPhysicalClass | `1.3.6.1.2.1.47.1.1.1.1.5` |
+
+## Licensing: list-licenses and license-health
+
+Both modes read `ciscoSlaEnabled` as TruthValue: 1 means enabled, 2 disabled. Absent, nonnumeric or invalid values are UNKNOWN; SNMP errors retain helper status. Disabled is OK with an explicit inventory-only message in `list-licenses`, but CRITICAL in `license-health`; neither walks entitlement rows in that case and no count metrics are emitted.
+
+When enabled, walk tags, requested quantities, enforcement states and optional short feature names. Use the union of column indices, including index 0; this prevents missing rows in one column from being silently discarded. Each row requires a nonempty tag, an integer quantity in the MIB's unsigned 32-bit range, and a recognized enforcement state. Missing feature names fall back to the tag, then an index label if the tag is also absent. Blank/invalid required values produce an unavailable row, not a success or a zero quantity. Distinct indices are retained even if tags repeat.
+
+`list-licenses` returns OK for structurally complete known states, including noncompliant ones. It prints the state but does not impose compliance alarms. Incomplete rows or unknown state numbers return UNKNOWN. The known legacy `notApplicable` state can be inventoried even though it cannot establish health.
+
+`license-health` applies this explicit policy to structurally valid rows:
+
+| State | Label | Health result |
+|---|---|---|
+| 1 | initialized | WARNING |
+| 2 | waiting | WARNING |
+| 3 | authorized | OK |
+| 4 | outOfCompliance | CRITICAL |
+| 5 | overage | OK: MIB defines permitted overage as still compliant |
+| 6 | evaluationPeriod | WARNING |
+| 7 | evaluationExpired | CRITICAL |
+| 8 | authorizationExpired | CRITICAL |
+| 9 | gracePeriodExpired | CRITICAL |
+| 10 | disabled | CRITICAL |
+| 11 | reservedAuthorized | OK |
+| 12 | invalidTag | CRITICAL |
+| 13 | notAuthorized | CRITICAL |
+| 14 | notApplicable | UNKNOWN: obsolete/indeterminate policy-mode state |
+| 15 | inUse | OK: policy-mode usage state, not subscription certification |
+| 16 | notInUse | OK only if quantity is 0; nonzero requests are UNKNOWN |
+
+Aggregate severity is confirmed CRITICAL first, then UNKNOWN, then WARNING, then OK. `notApplicable` and inconsistent `notInUse` rows are structurally valid but health-indeterminate. An SNMP operation failure aborts immediately rather than being merged into row status. There are no license thresholds or expiry calculations; traffic `-w/-c` do not affect licensing.
+
+### Empty table handling
+
+Only if every queried entitlement column is empty, query the current `cRFStatusUnitState`. State 9 produces OK with an explicit inventory/health-skipped message. Active, transitional, invalid or unavailable role data produces UNKNOWN. SNMP errors retain their own status; they are not a standby exception. The role is not guessed from the IP or a previous run. Partial tables cannot qualify as empty; populated standby tables are evaluated normally.
+
+### Licensing output and metrics
+
+The table is `Feature | Entitlement tag | Requested quantity | Enforcement status`, with decoded labels and numeric states. Requested quantity is not purchased quantity, AP capacity or unused license balance. Summary metrics for populated tables are `license_entitlements` (union-row count), `license_checked` (structurally valid rows), `license_problem` (health WARNING/CRITICAL rows), and `license_unknown` (invalid or health-indeterminate rows). Structurally valid but indeterminate rows can count in both checked and unknown. Inventory never counts enforcement states as problems. Empty standby skips emit only `license_entitlements=0 license_checked=0`; this is observed local table size, not a zero Smart Account balance.
+
+| Object | Numeric OID |
+|---|---|
+| ciscoSlaEnabled | `1.3.6.1.4.1.9.9.831.0.4.0` |
+| ciscoSlaEntitlementRequestCount | `1.3.6.1.4.1.9.9.831.0.5.1.1.2` |
+| ciscoSlaEntitlementTag | `1.3.6.1.4.1.9.9.831.0.5.1.1.3` |
+| ciscoSlaEntitlementEnforceMode | `1.3.6.1.4.1.9.9.831.0.5.1.1.5` |
+| ciscoSlaEntitlementFeatureName | `1.3.6.1.4.1.9.9.831.0.5.1.1.7` |
+
+Live walks found `.12` exposing `DNA_NWSTACK_E` / `air-network-essentials` and `AIR-DNA-E` / `air-dna-essentials`, each requested quantity 1 and authorized(3). `.13` exposed enablement but no entitlement rows. Legacy licensing end-date, maximum-count and remaining-count columns returned No Such Object on both; Smart authorization and certificate-expiry instances were absent. No licence-pool balance or subscription expiry can be derived from these results. Use CSSM or a licensing inventory integration for those values. Authorization expiry is distinct from subscription expiry.
+
+The new modes were tested by replaying the captured data and synthetic states, not run live. Tests covered all defined enforcement states, disabled/unsupported enablement, missing columns, partial rows, zero-index records, optional-name fallback, HA empty-table rules and SNMP errors. A successful health result means only that the exposed states satisfy the policy above.
 
 ## Link health: interface-health
 
@@ -125,6 +194,25 @@ Live walks on C9800-CL IOS-XE 17.15.6 showed the following snapshot. HA roles ca
 User-supplied live usage output from `172.23.36.12` showed valid Gi2/Vl2555 rates and OK. On `172.23.36.13`, Gi2 had valid rates but a Vl2555 counter decreased, producing UNKNOWN. Its cause is not established; it must not be assumed to be a genuine 64-bit wrap or harmless standby artifact. The filter permits intentionally monitoring only Gi2 without weakening reset validation for selected rows.
 
 Replay/synthetic tests covered rate calculations, threshold boundaries, HA skip/health failures, missing values, resets and interface-filter cases. Filtered live execution and live SNMPv3 verification have not been demonstrated in this session. These observations do not establish behavior on every C9800 version.
+
+## Software-version discovery
+
+Version discovery was performed manually over SNMP on 2026-10-14. It is not an additional plugin mode and does not affect any mode's exit status.
+
+1. Read `sysDescr.0` (`1.3.6.1.2.1.1.1.0`) for the running IOS-XE software description, release number and build.
+2. Walk `entPhysicalName` (`1.3.6.1.2.1.47.1.1.1.1.7`) and `entPhysicalSoftwareRev` (`1.3.6.1.2.1.47.1.1.1.1.10`), joining rows by entity index. Do not require a chassis-level revision: it was empty on these units while module revisions were populated.
+3. Treat `entPhysicalFirmwareRev` (`1.3.6.1.2.1.47.1.1.1.1.9`) as a separate field. Empty strings or the literal `Unknown` do not identify firmware or the running operating system.
+
+| Target | sysDescr version/build | R0 software (index 20) | F0 software (index 40) |
+|---|---|---|---|
+| `172.23.36.12` | `17.15.6`, `fc2` | `17.15.06` | `17.15.06` |
+| `172.23.36.13` | `17.15.6`, `fc2` | `17.15.06` | `17.15.06` |
+
+Both descriptions identified C9800-CL software and compilation time `Wed 22-Jul-26 03:38`. The module format pads the final numeric component with a zero; these observed values are consistent with the same release. They are not independent evidence of a separate `17.15.06` upgrade. No generic version-normalization or comparison algorithm is implemented.
+
+Chassis software revisions and most firmware revisions were empty; F0 firmware was the literal `Unknown` on both units. Component indices above are observed data, not hard-coded discovery rules. Both units returned the same `sysName` (`SP-99941-VES-ESX11-WLC1.localwpp.net`), so IP and the previously discovered local chassis serial distinguish the query targets.
+
+The snapshot confirms what SNMP reported at query time, not current vendor support, recommended upgrade level, vulnerability exposure or ongoing HA version agreement. The plugin does not compare against an expected release, compare peers or alarm on version differences. See the [README](README.md) for manual query commands.
 
 ## Operational limits
 
