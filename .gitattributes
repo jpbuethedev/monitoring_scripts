@@ -1,1 +1,2 @@
 check_cisco_fmc.py text eol=lf
+check_cisco_wlc_ntp.py text eol=lf

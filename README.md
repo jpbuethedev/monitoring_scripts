@@ -316,6 +316,57 @@ OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 
 ---
 
+### `check_cisco_wlc_ntp.py`
+
+Python plugin that checks the NTP synchronization state of a Cisco C9800 WLC via the standard NTPv4-MIB (`1.3.6.1.2.1.197`). Reports the device's own sync mode, stratum, active offset and per-peer stratum, so an unsynchronized WLC is flagged CRITICAL. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_wlc_ntp.md).
+
+| Feature | Detail |
+|---|---|
+| **Language** | Python 3 (`rh-python38` shebang) |
+| **MIBs** | NTPv4-MIB (`ntpEntStatus*`, `ntpAssocTable`) |
+| **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
+| **Platform** | Cisco C9800 WLC (tested on C9800-CL, IOS-XE 17.15.6) |
+| **Output** | Nagios format with perfdata (`offset_ms`, `stratum`, `peers_usable`, `dispersion_ms`) |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--hostname` | required | WLC hostname or IP address |
+| `--community` | — | SNMPv2c community string |
+| `--user` | — | SNMPv3 username |
+| `--timeout` | 5 | SNMP timeout in seconds |
+| `-w/--warning` | 100 | Warning threshold for absolute offset in milliseconds |
+| `-c/--critical` | 500 | Critical threshold for absolute offset in milliseconds |
+| `--min-peers` | 2 | WARNING if fewer peers than this are usable (stratum below 16) |
+
+CRITICAL if the mode is not running / not synchronized / no servers configured / synchronized to local clock only, if the stratum is 16, if no peer is usable, or if the offset reaches `--critical`. WARNING if the offset reaches `--warning` or fewer than `--min-peers` peers are usable. UNKNOWN if NTPv4-MIB isn't populated. `--authpw`/`--privpw` can also be supplied via `SNMP_AUTHPW`/`SNMP_PRIVPW`.
+
+Stratum is a server's distance from a primary time source. The plugin applies it to the device itself and to each configured peer:
+
+| Stratum | Meaning | How the plugin treats it |
+|---|---|---|
+| 0 | Unspecified / invalid | Not special-cased: a peer reporting 0 counts as usable |
+| 1 | Primary server, directly attached to a reference clock (GPS, radio, atomic) | Usable peer |
+| 2-15 | Secondary server, one hop further from the reference clock for each step | Usable peer |
+| 16 | Unsynchronized / not reachable (a peer that was never contacted shows `.INIT.`) | Unusable peer; on the device itself this is CRITICAL |
+
+**Usage:**
+```bash
+./check_cisco_wlc_ntp.py --hostname <WLC-IP> --community <community> [-w <ms>] [-c <ms>] [--min-peers <n>]
+```
+
+**Output example:**
+```
+OK - NTP synchronized to remote server 10.56.140.125 (stratum 2), offset -0.4433 ms, 3/4 peer(s) usable | offset_ms=0.4433ms;100;500;0; stratum=2;;;0;16 peers_usable=3;;;0;4 dispersion_ms=10.548ms;;;0;
+  * NTP Peer - 10.56.139.121 stratum 16 (unusable)
+  * NTP Peer - 10.56.139.122 stratum 2
+  * NTP Peer - 10.56.140.124 stratum 1
+  * NTP Peer - 10.56.140.125 stratum 1 (selected)
+```
+
+**Requirements:** `pysnmp`
+
+---
+
 ## Exit Codes (all monitoring scripts)
 
 | Code | Status |

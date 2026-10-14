@@ -147,6 +147,18 @@ OIDS = {
     "cntpPeersRefId":         "1.3.6.1.4.1.9.9.168.1.2.1.1.16",
     "cntpPeersOffset":        "1.3.6.1.4.1.9.9.168.1.2.1.1.20",
 
+    # NTPv4-MIB (RFC 5907) — standard NTP status; populated on Cisco C9800 WLC where the
+    # CISCO-NTP-MIB peer offset column is empty
+    "ntpEntStatusCurrentMode":        "1.3.6.1.2.1.197.1.2.1.0",
+    "ntpEntStatusStratum":            "1.3.6.1.2.1.197.1.2.2.0",
+    "ntpEntStatusActiveRefSourceId":  "1.3.6.1.2.1.197.1.2.3.0",
+    "ntpEntStatusActiveOffset":       "1.3.6.1.2.1.197.1.2.5.0",
+    "ntpEntStatusDispersion":         "1.3.6.1.2.1.197.1.2.7.0",
+    "ntpAssocRefId":                  "1.3.6.1.2.1.197.1.3.1.1.3",
+    "ntpAssocAddress":                "1.3.6.1.2.1.197.1.3.1.1.5",
+    "ntpAssocOffset":                 "1.3.6.1.2.1.197.1.3.1.1.6",
+    "ntpAssocStratum":                "1.3.6.1.2.1.197.1.3.1.1.7",
+
     # Cisco Image / Version
     "ciscoImageString":       "1.3.6.1.4.1.9.2.1.73.0",
     "ciscoImageVersion":      "1.3.6.1.4.1.9.9.305.1.1.1.0",
