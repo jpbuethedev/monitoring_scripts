@@ -8,6 +8,60 @@ A collection of Perl plugins, and PowerShell monitoring scripts used for WPP inf
 
 Nagios/Icinga-compatible plugins designed for use with NSClient++ or NRPE.
 
+### [check_cisco_ise.py](check_cisco_ise.py)
+
+Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Requires Python 3.8, classic `pysnmp==4.4.12`, `pyasn1==0.4.8`, and `pycryptodomex`, using the existing `ves_snmp_utils.py` module. See [check logic](LOGIC_check_cisco_ise.md) and [OID reference](OIDS_check_cisco_ise.md).
+
+```text
+./check_cisco_ise.py -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]
+./check_cisco_ise.py --hostname HOST [--community COMMUNITY] [--port PORT] [--timeout SECONDS] --mode MODE [OPTIONS]
+```
+
+`-P/--port` selects the SNMP UDP port (default 161, valid range 1-65535) for both GET and WALK requests, including SNMPv3 and fallback. Existing checks without a port option retain port 161. `-h/--help` includes this usage, mode descriptions, defaults and examples.
+
+Help and argument validation run before loading SNMP dependencies. Invoking the plugin with no arguments prints full help and exits UNKNOWN (3); `--help` exits 0. Real checks still require working SNMP/crypto dependencies. Interrupted dependency loading returns UNKNOWN without a traceback; a slow or stalled native-library import is an interpreter/environment issue, not an SNMP timeout.
+
+| Mode | Behavior | Default warning/critical |
+|---|---|---|
+| `cpu` | Last-minute average and busiest logical processor; either can drive status | 80% / 90% |
+| `disk` | Worst usage across required mount paths, selected by description rather than index | 80% / 90% |
+| `memory` | Raw physical RAM usage including cache/buffers, not available memory | Informational; supply both thresholds to alert |
+| `memory_usage` | Estimated active RAM use after subtracting free, buffer, and cached memory | Informational; supply both thresholds to alert |
+| `uptime` | SNMP-agent uptime, not OS uptime or reboot detection | No thresholds |
+| `sysinfo` | Required system description and object identifier; hostname best effort | No thresholds |
+| `interfaces` | Status of selected interfaces; counters and speed are informational | No thresholds |
+| `serial-numbers` | ENTITY-MIB serial-number inventory with best-effort component metadata | No thresholds |
+
+```bash
+read -r -s -p 'SNMP community: ' SNMP_COMMUNITY
+printf '\n'
+export SNMP_COMMUNITY
+./check_cisco_ise.py -H 172.23.38.11 --mode cpu
+./check_cisco_ise.py -H 172.23.38.11 --mode disk -v
+./check_cisco_ise.py -H 172.23.38.11 --mode memory
+./check_cisco_ise.py -H 172.23.38.11 --mode memory -w 95 -c 98
+./check_cisco_ise.py -H 172.23.38.11 --mode memory_usage
+./check_cisco_ise.py -H 172.23.38.11 --mode memory_usage -w 80 -c 90
+./check_cisco_ise.py -H 172.23.38.11 --mode uptime
+./check_cisco_ise.py -H 172.23.38.11 --mode sysinfo
+./check_cisco_ise.py -H 172.23.38.11 --mode interfaces -v
+./check_cisco_ise.py -H 172.23.38.11 --mode interfaces --include-interfaces eth0,eth1
+./check_cisco_ise.py -H 172.23.38.11 --mode serial-numbers -v
+unset SNMP_COMMUNITY
+```
+
+Disk defaults: `/`, `/opt`, `/boot`, `/tmp`, `/storedconfig`, `/mnt/encpart`. Override with `--include-mounts /,/opt` or omit paths with `--exclude-mounts /boot`. Selected mounts must exist exactly once with valid capacity data; otherwise the result is UNKNOWN. Other mounts, including container overlays and transient mounts, are not checked by default. Thresholds compare unrounded values, inclusive at the boundary. Configure monitoring retries for sustained alerts.
+
+`memory_usage` estimates active RAM as `memTotalReal - memAvailReal - memBuffer - memCached` from UCD-SNMP-MIB. It is not Linux `MemAvailable` or a measure of a particular process. Like raw `memory`, it is informational by default; configure both `-w` and `-c` to alert.
+
+Interface defaults omit `lo`, `podman*`, and `veth*`; `--include-interfaces` selects exact names and overrides those defaults, while `--exclude-interfaces` always omits exact names. An administratively enabled interface that is not operationally up is CRITICAL; administratively disabled interfaces are informational and admin-testing is WARNING. Speed, alias, errors, and discards are best-effort; counters do not affect status. Thresholds are not applicable to this mode.
+
+`serial-numbers` requires at least one non-empty `entPhysicalSerialNum` row; otherwise it returns UNKNOWN. It joins serials to entity name, class, model, and description by ENTITY-MIB index. Those metadata columns are best-effort; missing metadata is displayed as unavailable and does not hide a serial. This is inventory only and does not report license status or the ISE application release.
+
+`-C/--community` overrides `SNMP_COMMUNITY`. SNMPv3 uses `--user`, `--seclevel`, `--auth`, `--authpw`, `--priv`, `--privpw`; passwords may instead use `SNMP_AUTHPW` and `SNMP_PRIVPW`. Explicit CLI credentials take precedence. Environment variables avoid command-line/history exposure but must still be protected. `-t/--timeout` defaults to 5 seconds per SNMP request, not a whole-check deadline. `-v/--verbose` adds processor/mount detail after the status/perfdata line. Missing or invalid required metrics and timeouts return UNKNOWN; other SNMP failures retain shared-helper severity. This does not monitor RADIUS/TACACS+ authentication, personas, replication, or application readiness.
+
+The seven modes preceding `memory_usage` were live-tested against instance 1 (`172.23.38.11`) on Python 3.8/PySNMP 4.4.12. UCD-SNMP counters for `memory_usage` were discovered there, but the new plugin mode has not been run live. The deployed `serial-numbers` mode returned one component (`Cisco Application Deployment Engine`, model `ISE-VM-K9`) and OK. Instance 2 (`172.23.38.12`) timed out during discovery. Run focused tests from the repository root with `python -B -m unittest discover -s tests -p test_check_cisco_ise.py`.
+
 ### `check_bgp_peer.pl`
 
 Perl plugin that monitors BGP and EIGRP routing peer status via SNMP. It auto-detects the active routing protocol by querying BGP4-MIB first and falling back to CISCO-EIGRP-MIB. On Cisco devices it also detects the platform (IOS, IOS-XE, IOS-XR, NX-OS) and hardware model via ENTITY-MIB, and checks accepted prefix counts using CISCO-BGP4-MIB. For EIGRP, it handles multiple IOS index formats (with/without VPN ID, IPv4/IPv6) and resolves peer interface names via ifDescr. Outputs Nagios-format status with per-peer detail lines and performance data (`peers_total`, `peers_established`, `peers_down`).
