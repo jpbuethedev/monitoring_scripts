@@ -309,7 +309,7 @@ def _pysnmp_get_single(args, oid, auth_data):
         iterator = getCmd(
             SnmpEngine(),
             auth_data,
-            UdpTransportTarget((args.hostname, 161), timeout=args.timeout, retries=0),
+            UdpTransportTarget((args.hostname, getattr(args, 'port', 161)), timeout=args.timeout, retries=0),
             ContextData(),
             ObjectType(ObjectIdentity(oid))
         )
@@ -352,7 +352,7 @@ def _pysnmp_walk_raw(args, oid, auth_data):
         for errorIndication, errorStatus, errorIndex, varBinds in nextCmd(
             SnmpEngine(),
             auth_data,
-            UdpTransportTarget((args.hostname, 161), timeout=args.timeout, retries=0),
+            UdpTransportTarget((args.hostname, getattr(args, 'port', 161)), timeout=args.timeout, retries=0),
             ContextData(),
             ObjectType(ObjectIdentity(oid)),
             lexicographicMode=False
