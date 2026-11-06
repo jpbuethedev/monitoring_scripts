@@ -25,12 +25,16 @@ Help and argument validation run before loading SNMP dependencies. Invoking the 
 |---|---|---|
 | `cpu` | Last-minute average and busiest logical processor; either can drive status | 80% / 90% |
 | `disk` | Worst usage across required mount paths, selected by description rather than index | 80% / 90% |
+| `swap` | Used swap percentage and used/total GiB | 80% / 90% |
 | `memory` | Raw physical RAM usage including cache/buffers, not available memory | Informational; supply both thresholds to alert |
 | `memory_usage` | Estimated active RAM use after subtracting free, buffer, and cached memory | Informational; supply both thresholds to alert |
 | `uptime` | SNMP-agent uptime, not OS uptime or reboot detection | No thresholds |
+| `timesync` | Clock skew versus monitoring host using `hrSystemDate`; not NTP synchronization status | 5s / 30s |
 | `sysinfo` | Required system description and object identifier; hostname best effort | No thresholds |
-| `interfaces` | Status of selected interfaces; counters and speed are informational | No thresholds |
+| `interfaces` | Interface status, lifetime counters, traffic Mbps and error/discard rates | No rate thresholds; status controls alerts |
 | `serial-numbers` | ENTITY-MIB serial-number inventory with best-effort component metadata | No thresholds |
+
+Interface rates use two samples per execution, separated by `--rate-interval` seconds (default 5, finite `0 < seconds <= 60`, interfaces only). Actual per-counter request-midpoint times determine each rate. Traffic is in/out decimal Mbps; errors/discards are counts per second. `-v` shows per-interface rates beside lifetime counters; perfdata labels are `if:<name>:in_mbps`, `out_mbps`, `in_errors_s`, `out_errors_s`, `in_discards_s`, and `out_discards_s`, with units encoded in labels and no unit suffix. Aggregate rates appear only for complete samples across all selected interfaces. Missing/invalid data, changed interface names/reset markers, decreasing uptime or counters (including wraps), and invalid elapsed time suppress affected rates: `-` is not a zero. Rates do not change interface-state alerts. Runtime includes the sample pause plus SNMP requests; allow enough monitoring timeout. No persistent cache is used.
 
 ```bash
 read -r -s -p 'SNMP community: ' SNMP_COMMUNITY
@@ -38,13 +42,16 @@ printf '\n'
 export SNMP_COMMUNITY
 ./check_cisco_ise.py -H 172.23.38.11 --mode cpu
 ./check_cisco_ise.py -H 172.23.38.11 --mode disk -v
+./check_cisco_ise.py -H 172.23.38.11 --mode swap -w 80 -c 90
 ./check_cisco_ise.py -H 172.23.38.11 --mode memory
 ./check_cisco_ise.py -H 172.23.38.11 --mode memory -w 95 -c 98
 ./check_cisco_ise.py -H 172.23.38.11 --mode memory_usage
 ./check_cisco_ise.py -H 172.23.38.11 --mode memory_usage -w 80 -c 90
 ./check_cisco_ise.py -H 172.23.38.11 --mode uptime
+./check_cisco_ise.py -H 172.23.38.11 --mode timesync -w 5 -c 30
 ./check_cisco_ise.py -H 172.23.38.11 --mode sysinfo
 ./check_cisco_ise.py -H 172.23.38.11 --mode interfaces -v
+./check_cisco_ise.py -H 172.23.38.11 --mode interfaces --rate-interval 5 -v
 ./check_cisco_ise.py -H 172.23.38.11 --mode interfaces --include-interfaces eth0,eth1
 ./check_cisco_ise.py -H 172.23.38.11 --mode serial-numbers -v
 unset SNMP_COMMUNITY
@@ -53,6 +60,10 @@ unset SNMP_COMMUNITY
 Disk defaults: `/`, `/opt`, `/boot`, `/tmp`, `/storedconfig`, `/mnt/encpart`. Override with `--include-mounts /,/opt` or omit paths with `--exclude-mounts /boot`. Selected mounts must exist exactly once with valid capacity data; otherwise the result is UNKNOWN. Other mounts, including container overlays and transient mounts, are not checked by default. Thresholds compare unrounded values, inclusive at the boundary. Configure monitoring retries for sustained alerts.
 
 `memory_usage` estimates active RAM as `memTotalReal - memAvailReal - memBuffer - memCached` from UCD-SNMP-MIB. It is not Linux `MemAvailable` or a measure of a particular process. Like raw `memory`, it is informational by default; configure both `-w` and `-c` to alert.
+
+`swap` uses UCD-SNMP `memTotalSwap` and `memAvailSwap` (kB) to report `(total - free) / total * 100` and used/total GiB, with `swap_used` percentage perfdata. Defaults are warning 80% and critical 90%; either can be overridden. Missing, malformed, negative or inconsistent counters, or zero total swap, return UNKNOWN. Swap occupancy is not a paging-rate or memory-pressure measurement. Live-tested on `.11` on 2026-11-03: OK, 4.9% used (0.38/7.81 GiB). See [the live-test procedure](LOGIC_check_cisco_ise.md#swap-live-test).
+
+`timesync` compares timezone-aware `hrSystemDate` to the midpoint of the SNMP request on the monitoring host. Warning/critical thresholds are absolute skew in seconds (defaults 5/30, independently overridable, no 100-second cap). It reports direction and `clock_skew` perfdata. Missing/invalid timestamps or timestamps without a timezone return UNKNOWN. Keep the monitoring host's clock accurate; request delay and device timestamp precision affect the estimate. This checks clock agreement, not NTP peer or synchronization health. Live `.11` queries confirmed system time with a UTC offset; NTPv4-MIB and CISCO-NTP-MIB returned `No Such Object`. The staged plugin was live-tested on 2026-11-03: OK/exit 0, 0.3s behind the monitor.
 
 Interface defaults omit `lo`, `podman*`, and `veth*`; `--include-interfaces` selects exact names and overrides those defaults, while `--exclude-interfaces` always omits exact names. An administratively enabled interface that is not operationally up is CRITICAL; administratively disabled interfaces are informational and admin-testing is WARNING. Speed, alias, errors, and discards are best-effort; counters do not affect status. Thresholds are not applicable to this mode.
 

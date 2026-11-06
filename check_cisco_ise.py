@@ -5,6 +5,8 @@ import argparse
 import math
 import os
 import sys
+import time
+from datetime import datetime, timedelta, timezone
 
 NAGIOS_STATUS = ("OK", "WARNING", "CRITICAL", "UNKNOWN")
 _SNMP_LOADED = False
@@ -12,10 +14,21 @@ DEFAULT_MOUNTS = "/,/opt,/boot,/tmp,/storedconfig,/mnt/encpart"
 RAM_TYPE = "1.3.6.1.2.1.25.2.1.2"
 DISK_TYPE = "1.3.6.1.2.1.25.2.1.4"
 SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
+MEM_TOTAL_SWAP = "1.3.6.1.4.1.2021.4.3.0"
+MEM_AVAIL_SWAP = "1.3.6.1.4.1.2021.4.4.0"
 MEM_TOTAL_REAL = "1.3.6.1.4.1.2021.4.5.0"
 MEM_AVAIL_REAL = "1.3.6.1.4.1.2021.4.6.0"
 MEM_BUFFER = "1.3.6.1.4.1.2021.4.14.0"
 MEM_CACHED = "1.3.6.1.4.1.2021.4.15.0"
+INTERFACE_DISCONTINUITY = "1.3.6.1.2.1.31.1.1.1.19"
+INTERFACE_RATE_COUNTERS = (
+    ("in_mbps", "1.3.6.1.2.1.31.1.1.1.6", 18446744073709551615, 8 / 1000000),
+    ("out_mbps", "1.3.6.1.2.1.31.1.1.1.10", 18446744073709551615, 8 / 1000000),
+    ("in_errors_s", "1.3.6.1.2.1.2.2.1.14", 4294967295, 1),
+    ("out_errors_s", "1.3.6.1.2.1.2.2.1.20", 4294967295, 1),
+    ("in_discards_s", "1.3.6.1.2.1.2.2.1.13", 4294967295, 1),
+    ("out_discards_s", "1.3.6.1.2.1.2.2.1.19", 4294967295, 1),
+)
 
 
 class CheckError(Exception):
@@ -90,6 +103,13 @@ def thresholds(args):
         if args.warning is not None or args.critical is not None:
             raise CheckError("Thresholds are not applicable to " + args.mode)
         return None, None
+    if args.mode == "timesync":
+        warning = 5.0 if args.warning is None else args.warning
+        critical = 30.0 if args.critical is None else args.critical
+        if not (math.isfinite(warning) and math.isfinite(critical)
+                and 0 <= warning < critical):
+            raise CheckError("Clock-skew thresholds must satisfy 0 <= warning < critical (seconds)")
+        return warning, critical
     if args.mode in ("memory", "memory_usage"):
         if args.warning is None and args.critical is None:
             return None, None
@@ -175,6 +195,21 @@ def check_memory_usage(args, warning, critical):
             perf("memory_active_used", percentage, warning, critical), [])
 
 
+def check_swap(args, warning, critical):
+    total = integer(query(args, MEM_TOTAL_SWAP), "swap total", 0, 4294967295)
+    free = integer(query(args, MEM_AVAIL_SWAP), "swap free", 0, 4294967295)
+    if free > total:
+        raise CheckError("Inconsistent UCD-SNMP swap counters: free exceeds total")
+    if total == 0:
+        raise CheckError("No swap configured (total swap is zero)")
+    used = total - free
+    percentage = used * 100 / total
+    summary = "Swap used {:.1f}% ({:.2f}/{:.2f} GiB)".format(
+        percentage, used / 1024 ** 2, total / 1024 ** 2)
+    return (severity(percentage, warning, critical), summary,
+            perf("swap_used", percentage, warning, critical), [])
+
+
 def mount_paths(value):
     return {path.strip() for path in value.split(",") if path.strip()}
 
@@ -223,6 +258,60 @@ def optional_interface_walk(args, key):
         return None
 
 
+def optional_interface_integer(args, oid, maximum=4294967295):
+    try:
+        return integer(query(args, oid), "interface rate counter", maximum=maximum)
+    except CheckError:
+        return None
+
+
+def interface_rate_snapshot(args, selected):
+    uptime_before = optional_interface_integer(args, "sysUpTime")
+    readings = {}
+    for index in selected:
+        try:
+            name = snmp_value_to_str(query(args, OIDS["ifName"] + "." + str(index))).strip()
+        except CheckError:
+            name = None
+        marker_oid = INTERFACE_DISCONTINUITY + "." + str(index)
+        marker_before = optional_interface_integer(args, marker_oid)
+        counters = {}
+        for label, oid, maximum, scale in INTERFACE_RATE_COUNTERS:
+            started = time.monotonic()
+            value = optional_interface_integer(args, oid + "." + str(index), maximum)
+            finished = time.monotonic()
+            counters[label] = (value, (started + finished) / 2)
+        marker_after = optional_interface_integer(args, marker_oid)
+        readings[index] = (name, marker_before, marker_after, counters)
+    uptime_after = optional_interface_integer(args, "sysUpTime")
+    return uptime_before, uptime_after, readings
+
+
+def interface_rates(args, selected):
+    first = interface_rate_snapshot(args, selected)
+    time.sleep(args.rate_interval)
+    second = interface_rate_snapshot(args, selected)
+    uptimes = (first[0], first[1], second[0], second[1])
+    if any(value is None for value in uptimes) or list(uptimes) != sorted(uptimes):
+        return {}
+    rates = {}
+    for index, name in selected.items():
+        before = first[2][index]
+        after = second[2][index]
+        markers = (before[1], before[2], after[1], after[2])
+        if (before[0] != name or after[0] != name
+                or any(marker is None for marker in markers) or len(set(markers)) != 1):
+            continue
+        rates[index] = {}
+        for label, oid, maximum, scale in INTERFACE_RATE_COUNTERS:
+            previous, started = before[3][label]
+            current, finished = after[3][label]
+            elapsed = finished - started
+            if previous is not None and current is not None and current >= previous and elapsed > 0:
+                rates[index][label] = (current - previous) / elapsed * scale
+    return rates
+
+
 def check_interfaces(args):
     names = query(args, "ifName", walk=True)
     admin = query(args, "ifAdminStatus", walk=True)
@@ -240,6 +329,7 @@ def check_interfaces(args):
         "ifInErrors", "ifOutErrors", "ifInDiscards", "ifOutDiscards")}
 
     rows = []
+    selected = {}
     down = []
     testing = []
     errors_total = 0
@@ -310,6 +400,7 @@ def check_interfaces(args):
         else:
             status = "UP"
         rows.append((text(name), alias, status, speed, errors, discards))
+        selected[index] = name
 
     if not rows:
         raise CheckError("No interfaces selected to monitor")
@@ -329,7 +420,54 @@ def check_interfaces(args):
         metrics += " 'errors_total'={};;;; 'discards_total'={};;;;".format(
             errors_total, discards_total)
     details = ["{} | {} | {} | {} | errors {} | discards {}".format(*row) for row in rows]
+    rates = interface_rates(args, selected)
+    complete = sum(len(rates.get(index, {})) == len(INTERFACE_RATE_COUNTERS) for index in selected)
+    summary += "; rates available for {}/{} interfaces".format(complete, len(rows))
+    if complete == len(rows):
+        totals = [sum(rates[index][label] for index in selected)
+                  for label, _, _, _ in INTERFACE_RATE_COUNTERS]
+        summary += "; traffic {:.3f}/{:.3f} Mbps, errors {:.2f}/{:.2f}/s, discards {:.2f}/{:.2f}/s (in/out)".format(
+            *totals)
+    for position, index in enumerate(selected):
+        values = rates.get(index, {})
+        formatted = ["{:.3f}".format(values[label]) if label in values else "-"
+                     for label, _, _, _ in INTERFACE_RATE_COUNTERS]
+        details[position] += " | traffic {}/{} Mbps | error rate {}/{}/s | discard rate {}/{}/s (in/out)".format(
+            *formatted)
+        if len(values) != len(INTERFACE_RATE_COUNTERS):
+            details[position] += " | rates incomplete (missing, changed or reset counters)"
+        for label, value in values.items():
+            metrics += " " + perf("if:" + text(selected[index]) + ":" + label,
+                                   value, unit="", maximum=None)
     return exit_code, summary, metrics, details
+
+
+def check_timesync(args, warning, critical):
+    started = datetime.now(timezone.utc)
+    value = query(args, "hrSystemDate")
+    finished = datetime.now(timezone.utc)
+    try:
+        octets = value.asOctets()
+        if len(octets) != 11 or octets[8] not in (ord("+"), ord("-")):
+            raise ValueError("missing or invalid timezone")
+        if octets[7] > 9 or octets[9] > 13 or octets[10] > 59:
+            raise ValueError("invalid time component")
+        offset = timedelta(hours=octets[9], minutes=octets[10])
+        if octets[8] == ord("-"):
+            offset = -offset
+        device_time = datetime((octets[0] << 8) | octets[1], octets[2], octets[3],
+                               octets[4], octets[5], octets[6], octets[7] * 100000,
+                               tzinfo=timezone(offset))
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        raise CheckError("Invalid hrSystemDate; a valid timestamp with explicit timezone is required")
+    midpoint = started + (finished - started) / 2
+    clock_offset = (device_time - midpoint).total_seconds()
+    skew = abs(clock_offset)
+    direction = "ahead" if clock_offset >= 0 else "behind"
+    summary = "ISE clock skew vs monitoring host: {:.1f}s ({}); not NTP synchronization status".format(
+        skew, direction)
+    return (severity(skew, warning, critical), summary,
+            perf("clock_skew", skew, warning, critical, unit="s", maximum=None), [])
 
 
 def check_uptime(args):
@@ -418,11 +556,13 @@ def parse_args(argv):
                "\nModes:\n"
                "  cpu      Last-minute average CPU load and busiest logical processor\n"
                "  disk     Usage of selected mount paths; the busiest mount drives status\n"
+               "  swap     Swap space usage (default warning 80%%, critical 90%%)\n"
                "  memory   Raw physical RAM usage including cache/buffers; informational\n"
                "           unless both --warning and --critical are supplied\n"
                 "  memory_usage  Estimated active RAM use excluding cache/buffers\n"
                 "                (not Linux MemAvailable)\n"
                "  uptime   SNMP-agent uptime in days/seconds, not OS uptime\n"
+               "  timesync Clock skew vs monitoring host, not NTP status (seconds; defaults 5/30)\n"
                 "  sysinfo  System description, object identifier and optional hostname\n"
                 "  interfaces  Status of selected physical interfaces; counters are informational\n"
                 "  serial-numbers  List ENTITY-MIB serial numbers"),
@@ -433,6 +573,8 @@ def parse_args(argv):
                 "--port 161 --timeout 5 --mode disk -v\n"
                 "  %(prog)s -H 172.23.38.11 --mode memory\n"
                 "  %(prog)s -H 172.23.38.11 --mode memory_usage\n"
+                "  %(prog)s -H 172.23.38.11 --mode swap -w 80 -c 90\n"
+                "  %(prog)s -H 172.23.38.11 --mode timesync -w 5 -c 30\n"
                 "  %(prog)s -H 172.23.38.11 --mode interfaces -v\n"
                 "  %(prog)s -H 172.23.38.11 --mode serial-numbers -v\n"
                 "\nCredentials: use -C/--community or SNMP_COMMUNITY for SNMPv2c;\n"
@@ -453,17 +595,21 @@ def parse_args(argv):
                         help="Per-request timeout in seconds (default: 5)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show processor or mount details")
     parser.add_argument("--mode", required=True,
-                        choices=("cpu", "disk", "memory", "memory_usage", "uptime", "sysinfo", "interfaces",
-                                 "serial-numbers"),
+                        choices=("cpu", "disk", "swap", "memory", "memory_usage", "uptime", "sysinfo", "interfaces",
+                                 "serial-numbers", "timesync"),
                         help="Check to run (see Modes above)")
-    parser.add_argument("-w", "--warning", type=float, help="Percent (cpu/disk default 80)")
-    parser.add_argument("-c", "--critical", type=float, help="Percent (cpu/disk default 90)")
+    parser.add_argument("-w", "--warning", type=float,
+                        help="Percent (cpu/disk/swap default 80); seconds (timesync default 5)")
+    parser.add_argument("-c", "--critical", type=float,
+                        help="Percent (cpu/disk/swap default 90); seconds (timesync default 30)")
     parser.add_argument("--include-mounts", default=None, help="Required disk paths, comma-separated")
     parser.add_argument("--exclude-mounts", default=None, help="Disk paths to omit, comma-separated")
     parser.add_argument("--include-interfaces", default=None,
                         help="Interface names to monitor, comma-separated (overrides defaults)")
     parser.add_argument("--exclude-interfaces", default=None,
                         help="Interface names to omit, comma-separated")
+    parser.add_argument("--rate-interval", type=float, default=None,
+                        help="Seconds between interface rate samples (default 5, range >0 to 60)")
     arguments = sys.argv[1:] if argv is None else argv
     if not arguments:
         parser.print_help()
@@ -487,6 +633,12 @@ def parse_args(argv):
         raise CheckError("Mount filters are only applicable to disk mode")
     if args.mode != "interfaces" and (args.include_interfaces is not None or args.exclude_interfaces is not None):
         raise CheckError("Interface filters are only applicable to interfaces mode")
+    if args.rate_interval is not None:
+        if args.mode != "interfaces":
+            raise CheckError("--rate-interval is only applicable to interfaces mode")
+        if not math.isfinite(args.rate_interval) or not 0 < args.rate_interval <= 60:
+            raise CheckError("Rate interval must be finite and satisfy 0 < interval <= 60 seconds")
+    args.rate_interval = 5.0 if args.rate_interval is None else args.rate_interval
     args.include_mounts = DEFAULT_MOUNTS if args.include_mounts is None else args.include_mounts
     args.exclude_mounts = args.exclude_mounts or ""
     return args
@@ -499,6 +651,8 @@ def main(argv=None):
         load_snmp_dependencies()
         if args.mode == "uptime":
             result = check_uptime(args)
+        elif args.mode == "timesync":
+            result = check_timesync(args, warning, critical)
         elif args.mode == "memory_usage":
             result = check_memory_usage(args, warning, critical)
         elif args.mode == "sysinfo":
@@ -508,7 +662,8 @@ def main(argv=None):
         elif args.mode == "serial-numbers":
             result = check_serial_numbers(args)
         else:
-            result = {"cpu": check_cpu, "memory": check_memory, "disk": check_disk}[
+            result = {"cpu": check_cpu, "memory": check_memory, "disk": check_disk,
+                      "swap": check_swap}[
                 args.mode](args, warning, critical)
         code, summary, metrics, details = result
         print("{} - {}{}".format(NAGIOS_STATUS[code], summary, " | " + metrics if metrics else ""))

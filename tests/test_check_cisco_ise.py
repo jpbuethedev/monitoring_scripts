@@ -5,6 +5,8 @@ import subprocess
 import sys
 import unittest
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
+from pysnmp.proto.rfc1902 import OctetString
 from unittest.mock import patch
 
 import check_cisco_ise as ise
@@ -14,9 +16,10 @@ ise.load_snmp_dependencies()
 
 
 class ISECheckTests(unittest.TestCase):
-    def run_check(self, mode, extra=(), walks=None, gets=None):
+    def run_check(self, mode, extra=(), walks=None, gets=None, rates=None):
         output = io.StringIO()
         with patch.dict(os.environ, {}, clear=True), \
+            patch.object(ise, "interface_rates", return_value=rates or {}), \
                 patch.object(ise, "pysnmp_walk_indexed", side_effect=lambda args, oid: (
                     walks.get(oid, {}), 0)), \
                 patch.object(ise, "pysnmp_get", side_effect=lambda args, oid: (
@@ -61,6 +64,84 @@ class ISECheckTests(unittest.TestCase):
     def test_invalid_cpu(self):
         for loads in ({}, {1: -1}, {1: 101}, {1: "broken"}, {1: "nan"}):
             self.assertEqual(self.run_check("cpu", walks={ise.OIDS["hrProcessorLoad"]: loads})[0], 3)
+
+    def rate_snapshot(self, value=100, marker=0, name="eth0", uptime=100):
+        counters = {label: (value, 10.0) for label, _, _, _ in ise.INTERFACE_RATE_COUNTERS}
+        return uptime, uptime, {2: (name, marker, marker, counters)}
+
+    def test_interface_rates_use_measured_counter_intervals(self):
+        first = self.rate_snapshot()
+        second = self.rate_snapshot(value=110)
+        for label, _, _, _ in ise.INTERFACE_RATE_COUNTERS:
+            second[2][2][3][label] = (110, 12.0)
+        second[2][2][3]["in_mbps"] = (1250100, 20.0)
+        with patch.object(ise, "interface_rate_snapshot", side_effect=[first, second]), \
+                patch.object(ise.time, "sleep") as sleep:
+            rates = ise.interface_rates(SimpleNamespace(rate_interval=5), {2: "eth0"})
+        self.assertEqual(rates[2]["in_mbps"], 1)
+        self.assertEqual(rates[2]["in_errors_s"], 5)
+        self.assertEqual(rates[2]["out_discards_s"], 5)
+        sleep.assert_called_once_with(5)
+
+    def test_interface_rates_suppress_resets_missing_data_and_renames(self):
+        for second in (self.rate_snapshot(marker=1), self.rate_snapshot(marker=None),
+                       self.rate_snapshot(name="eth1"), self.rate_snapshot(uptime=99),
+                       self.rate_snapshot(uptime=None)):
+            with patch.object(ise, "interface_rate_snapshot", side_effect=[self.rate_snapshot(), second]), \
+                    patch.object(ise.time, "sleep"):
+                self.assertEqual(ise.interface_rates(SimpleNamespace(rate_interval=1), {2: "eth0"}), {})
+        first = self.rate_snapshot()
+        second = self.rate_snapshot()
+        for label, _, _, _ in ise.INTERFACE_RATE_COUNTERS:
+            second[2][2][3][label] = (99, 12.0)
+        second[2][2][3]["out_mbps"] = (None, 12.0)
+        second[2][2][3]["in_errors_s"] = (100, 10.0)
+        with patch.object(ise, "interface_rate_snapshot", side_effect=[first, second]), \
+                patch.object(ise.time, "sleep"):
+            self.assertEqual(ise.interface_rates(SimpleNamespace(rate_interval=1), {2: "eth0"}), {2: {}})
+
+    def test_interface_rate_snapshot_validation_and_timing(self):
+        def get_value(args, key, walk=False):
+            if key == "sysUpTime":
+                return 100
+            if key == ise.OIDS["ifName"] + ".2":
+                return "eth0"
+            if key == ise.INTERFACE_DISCONTINUITY + ".2":
+                return 0
+            if key == ise.INTERFACE_RATE_COUNTERS[0][1] + ".2":
+                return 4294967296
+            return "No Such Object"
+        with patch.object(ise, "query", side_effect=get_value), \
+                patch.object(ise.time, "monotonic", side_effect=range(12)):
+            snapshot = ise.interface_rate_snapshot(SimpleNamespace(), {2: "eth0"})
+        self.assertEqual(snapshot[:2], (100, 100))
+        self.assertEqual(snapshot[2][2][:3], ("eth0", 0, 0))
+        self.assertEqual(snapshot[2][2][3]["in_mbps"], (4294967296, 0.5))
+        self.assertEqual(snapshot[2][2][3]["out_mbps"], (None, 2.5))
+
+    def test_interfaces_render_rates_and_preserve_status(self):
+        rates = {2: {label: value for (label, _, _, _), value in
+                     zip(ise.INTERFACE_RATE_COUNTERS, (1.25, 2.5, 3, 4, 5, 6))}}
+        code, output = self.run_check("interfaces", ["-v"], self.interfaces({2: "eth0"}), rates=rates)
+        self.assertEqual(code, 0)
+        self.assertIn("traffic 1.250/2.500 Mbps", output)
+        self.assertIn("error rate 3.000/4.000/s", output)
+        self.assertIn("discard rate 5.000/6.000/s", output)
+        self.assertIn("'if:eth0:in_mbps'=1.25;;;0;", output)
+        self.assertIn("'if:eth0:out_discards_s'=6;;;0;", output)
+        code, output = self.run_check("interfaces", ["-v"],
+                                      self.interfaces({2: "eth0"}, oper={2: 2}), rates={})
+        self.assertEqual(code, 2)
+        self.assertIn("rates available for 0/1 interfaces", output)
+        self.assertIn("traffic -/- Mbps", output)
+        self.assertNotIn("'if:eth0:in_mbps'", output)
+
+    def test_interface_rate_interval_validation(self):
+        for interval in ("0", "-1", "61", "nan", "inf"):
+            self.assertEqual(self.run_check("interfaces", ["--rate-interval", interval])[0], 3)
+        self.assertEqual(self.run_check("cpu", ["--rate-interval", "1"])[0], 3)
+        code, _ = self.run_check("interfaces", ["--rate-interval", "1"], self.interfaces({2: "eth0"}))
+        self.assertEqual(code, 0)
 
     def test_interfaces_default_filters_and_details(self):
         walks = self.interfaces({1: "lo", 2: "eth0", 8: "podman2", 9: "veth0", 3: "eth1"})
@@ -209,6 +290,83 @@ class ISECheckTests(unittest.TestCase):
         inconsistent = dict(gets)
         inconsistent[ise.MEM_CACHED] = 101
         self.assertEqual(self.run_check("memory_usage", gets=inconsistent)[0], 3)
+
+    def test_swap_usage_and_unit_conversion(self):
+        gets = {ise.MEM_TOTAL_SWAP: 8 * 1024 ** 2, ise.MEM_AVAIL_SWAP: 6 * 1024 ** 2}
+        code, output = self.run_check("swap", gets=gets)
+        self.assertEqual(code, 0)
+        self.assertIn("Swap used 25.0% (2.00/8.00 GiB)", output)
+        self.assertIn("'swap_used'=25%;80;90;0;100", output)
+
+    def test_swap_unrounded_thresholds_and_overrides(self):
+        for free, expected in ((10000, 0), (2001, 0), (2000, 1), (1001, 1), (1000, 2), (0, 2)):
+            with self.subTest(free=free):
+                gets = {ise.MEM_TOTAL_SWAP: 10000, ise.MEM_AVAIL_SWAP: free}
+                self.assertEqual(self.run_check("swap", gets=gets)[0], expected)
+        gets = {ise.MEM_TOTAL_SWAP: 100, ise.MEM_AVAIL_SWAP: 50}
+        self.assertEqual(self.run_check("swap", ["-w", "40", "-c", "50"], gets=gets)[0], 2)
+        self.assertEqual(self.run_check("swap", ["-w", "40"], gets=gets)[0], 1)
+        self.assertEqual(self.run_check("swap", ["-w", "90", "-c", "80"], gets=gets)[0], 3)
+
+    def test_swap_invalid_missing_and_zero_counters(self):
+        for total, free in ((0, 0), (0, 1), (100, 101), (-1, 0), (100, -1),
+                            ("No Such Object", 0), (100, "bad"),
+                            (4294967296, 0), (100, 4294967296)):
+            with self.subTest(total=total, free=free):
+                code, output = self.run_check("swap", gets={
+                    ise.MEM_TOTAL_SWAP: total, ise.MEM_AVAIL_SWAP: free})
+                self.assertEqual(code, 3)
+                self.assertNotIn("'swap_used'", output)
+        self.assertEqual(self.run_check("swap", gets={})[0], 3)
+        with patch.object(ise, "query", side_effect=ise.CheckError("SNMP timeout")):
+            code, output = self.run_check("swap", gets={})
+        self.assertEqual(code, 3)
+        self.assertIn("SNMP timeout", output)
+
+    def test_timesync_midpoint_thresholds_and_direction(self):
+        device = OctetString(bytes((7, 234, 11, 3, 12, 55, 2, 0, 43, 0, 0)))
+        device_time = datetime(2026, 11, 3, 12, 55, 2, tzinfo=timezone.utc)
+        for offset, expected in ((0, 0), (4.9, 0), (5, 1), (-5, 1), (29.9, 1), (30, 2), (-30, 2)):
+            with self.subTest(offset=offset):
+                midpoint = device_time - timedelta(seconds=offset)
+                with patch.object(ise, "datetime", wraps=datetime) as clock:
+                    clock.now.side_effect = [midpoint - timedelta(seconds=1),
+                                             midpoint + timedelta(seconds=1)]
+                    code, output = self.run_check("timesync", gets={ise.OIDS["hrSystemDate"]: device})
+                self.assertEqual(code, expected)
+                self.assertIn("ahead" if offset >= 0 else "behind", output)
+                self.assertIn("not NTP synchronization status", output)
+                self.assertIn(";5;30;0;", output)
+
+    def test_timesync_timezone_offsets_and_deciseconds(self):
+        for hour, sign, offset_hour in ((14, 43, 2), (10, 45, 2)):
+            with self.subTest(sign=sign):
+                device = OctetString(bytes((7, 234, 11, 3, hour, 55, 2, 5, sign, offset_hour, 30)))
+                reference_hour = 12 if sign == 43 else 13
+                reference = datetime(2026, 11, 3, reference_hour, 25, 2, 500000, tzinfo=timezone.utc)
+                with patch.object(ise, "datetime", wraps=datetime) as clock:
+                    clock.now.return_value = reference
+                    code, output = self.run_check("timesync", gets={ise.OIDS["hrSystemDate"]: device})
+                self.assertEqual(code, 0)
+                self.assertIn("'clock_skew'=0s;5;30;0;", output)
+
+    def test_timesync_invalid_data_and_thresholds(self):
+        valid = bytes((7, 234, 11, 3, 12, 55, 2, 0, 43, 0, 0))
+        values = ["No Such Object", OctetString(valid[:8]), OctetString(b"")]
+        for index, invalid in ((2, 13), (3, 0), (4, 24), (5, 60), (6, 60),
+                               (7, 10), (8, 0), (9, 14), (10, 60)):
+            octets = bytearray(valid)
+            octets[index] = invalid
+            values.append(OctetString(bytes(octets)))
+        for value in values:
+            with self.subTest(value=value):
+                code, output = self.run_check("timesync", gets={ise.OIDS["hrSystemDate"]: value})
+                self.assertEqual(code, 3)
+                self.assertIn("Invalid hrSystemDate", output)
+        for warning, critical in ((-1, 30), (5, 5), (30, 5), ("nan", 30), (5, "inf")):
+            self.assertEqual(self.run_check("timesync", ["-w", str(warning), "-c", str(critical)], gets={})[0], 3)
+        args = ise.parse_args(["-H", "ise", "-C", "test-only", "--mode", "timesync", "-c", "120"])
+        self.assertEqual(ise.thresholds(args), (5, 120))
 
     def test_uptime(self):
         code, output = self.run_check("uptime", gets={ise.OIDS["sysUpTime"]: 389536126})
