@@ -120,7 +120,7 @@ CRITICAL - NTP not synchronized (stratum 16), 0/4 peer(s) usable | stratum=16;;;
 ## What this check does not do
 
 - It does not check the NTP servers directly. It relies on the stratum values the WLC reports for them.
-- It does not use CISCO-NTP-MIB. The peer offset column is empty on the C9800, so the `check_ves_ntp_timesync.py` script from `wpp-service-checks-python` cannot be used for it.
+- It does not use CISCO-NTP-MIB. The peer offset column is empty on the C9800, so the separate `check_ves_ntp_timesync.py` plugin is not suitable for it.
 - It has not been tested on platforms other than the C9800-CL (IOS-XE 17.15.6). Firepower/FTD devices do not expose NTP state over SNMP at all.
 
-For usage, parameters and examples, see the [README](README.md#check_cisco_wlc_ntppy).
+For usage, parameters and examples, see the [README](../README.md#check_cisco_wlc_ntppy).

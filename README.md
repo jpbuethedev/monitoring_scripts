@@ -4,17 +4,17 @@ A collection of Perl plugins, and PowerShell monitoring scripts used for WPP inf
 
 ---
 
-## Monitoring Scripts (`monitoring_scripts/`)
+## Monitoring Scripts (`scripts/`)
 
 Nagios/Icinga-compatible plugins designed for use with NSClient++ or NRPE.
 
-### [check_cisco_ise.py](check_cisco_ise.py)
+### [check_cisco_ise.py](scripts/check_cisco_ise.py)
 
-Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Requires Python 3.8, classic `pysnmp==4.4.12`, `pyasn1==0.4.8`, and `pycryptodomex`, using the existing `ves_snmp_utils.py` module. See [check logic](LOGIC_check_cisco_ise.md) and [OID reference](OIDS_check_cisco_ise.md).
+Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Requires Python 3.8, classic `pysnmp==4.4.12`, `pyasn1==0.4.8`, and `pycryptodomex`, using the existing [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module. See [check logic](docs/LOGIC_check_cisco_ise.md) and [OID reference](docs/OIDS_check_cisco_ise.md).
 
 ```text
-./check_cisco_ise.py -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]
-./check_cisco_ise.py --hostname HOST [--community COMMUNITY] [--port PORT] [--timeout SECONDS] --mode MODE [OPTIONS]
+./scripts/check_cisco_ise.py -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]
+./scripts/check_cisco_ise.py --hostname HOST [--community COMMUNITY] [--port PORT] [--timeout SECONDS] --mode MODE [OPTIONS]
 ```
 
 `-P/--port` selects the SNMP UDP port (default 161, valid range 1-65535) for both GET and WALK requests, including SNMPv3 and fallback. Existing checks without a port option retain port 161. `-h/--help` includes this usage, mode descriptions, defaults and examples.
@@ -25,34 +25,45 @@ Help and argument validation run before loading SNMP dependencies. Invoking the 
 |---|---|---|
 | `cpu` | Last-minute average and busiest logical processor; either can drive status | 80% / 90% |
 | `disk` | Worst usage across required mount paths, selected by description rather than index | 80% / 90% |
+| `swap` | Used swap percentage and used/total GiB | 80% / 90% |
 | `memory` | Raw physical RAM usage including cache/buffers, not available memory | Informational; supply both thresholds to alert |
 | `memory_usage` | Estimated active RAM use after subtracting free, buffer, and cached memory | Informational; supply both thresholds to alert |
 | `uptime` | SNMP-agent uptime, not OS uptime or reboot detection | No thresholds |
+| `timesync` | Clock skew versus monitoring host using `hrSystemDate`; not NTP synchronization status | 5s / 30s |
 | `sysinfo` | Required system description and object identifier; hostname best effort | No thresholds |
-| `interfaces` | Status of selected interfaces; counters and speed are informational | No thresholds |
+| `interfaces` | Interface status, lifetime counters, traffic Mbps and error/discard rates | No rate thresholds; status controls alerts |
 | `serial-numbers` | ENTITY-MIB serial-number inventory with best-effort component metadata | No thresholds |
+
+Interface rates use two samples per execution, separated by `--rate-interval` seconds (default 5, finite `0 < seconds <= 60`, interfaces only). Actual per-counter request-midpoint times determine each rate. Traffic is in/out decimal Mbps; errors/discards are counts per second. `-v` shows per-interface rates beside lifetime counters; perfdata labels are `if:<name>:in_mbps`, `out_mbps`, `in_errors_s`, `out_errors_s`, `in_discards_s`, and `out_discards_s`, with units encoded in labels and no unit suffix. Aggregate rates appear only for complete samples across all selected interfaces. Missing/invalid data, changed interface names/reset markers, decreasing uptime or counters (including wraps), and invalid elapsed time suppress affected rates: `-` is not a zero. Rates do not change interface-state alerts. Runtime includes the sample pause plus SNMP requests; allow enough monitoring timeout. No persistent cache is used.
 
 ```bash
 read -r -s -p 'SNMP community: ' SNMP_COMMUNITY
 printf '\n'
 export SNMP_COMMUNITY
-./check_cisco_ise.py -H 172.23.38.11 --mode cpu
-./check_cisco_ise.py -H 172.23.38.11 --mode disk -v
-./check_cisco_ise.py -H 172.23.38.11 --mode memory
-./check_cisco_ise.py -H 172.23.38.11 --mode memory -w 95 -c 98
-./check_cisco_ise.py -H 172.23.38.11 --mode memory_usage
-./check_cisco_ise.py -H 172.23.38.11 --mode memory_usage -w 80 -c 90
-./check_cisco_ise.py -H 172.23.38.11 --mode uptime
-./check_cisco_ise.py -H 172.23.38.11 --mode sysinfo
-./check_cisco_ise.py -H 172.23.38.11 --mode interfaces -v
-./check_cisco_ise.py -H 172.23.38.11 --mode interfaces --include-interfaces eth0,eth1
-./check_cisco_ise.py -H 172.23.38.11 --mode serial-numbers -v
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode cpu
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode disk -v
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode swap -w 80 -c 90
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode memory
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode memory -w 95 -c 98
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode memory_usage
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode memory_usage -w 80 -c 90
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode uptime
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode timesync -w 5 -c 30
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode sysinfo
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode interfaces -v
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode interfaces --rate-interval 5 -v
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode interfaces --include-interfaces eth0,eth1
+./scripts/check_cisco_ise.py -H 172.23.38.11 --mode serial-numbers -v
 unset SNMP_COMMUNITY
 ```
 
 Disk defaults: `/`, `/opt`, `/boot`, `/tmp`, `/storedconfig`, `/mnt/encpart`. Override with `--include-mounts /,/opt` or omit paths with `--exclude-mounts /boot`. Selected mounts must exist exactly once with valid capacity data; otherwise the result is UNKNOWN. Other mounts, including container overlays and transient mounts, are not checked by default. Thresholds compare unrounded values, inclusive at the boundary. Configure monitoring retries for sustained alerts.
 
 `memory_usage` estimates active RAM as `memTotalReal - memAvailReal - memBuffer - memCached` from UCD-SNMP-MIB. It is not Linux `MemAvailable` or a measure of a particular process. Like raw `memory`, it is informational by default; configure both `-w` and `-c` to alert.
+
+`swap` uses UCD-SNMP `memTotalSwap` and `memAvailSwap` (kB) to report `(total - free) / total * 100` and used/total GiB, with `swap_used` percentage perfdata. Defaults are warning 80% and critical 90%; either can be overridden. Missing, malformed, negative or inconsistent counters, or zero total swap, return UNKNOWN. Swap occupancy is not a paging-rate or memory-pressure measurement. Live-tested on `.11` on 2026-11-03: OK, 4.9% used (0.38/7.81 GiB). See [the live-test procedure](docs/LOGIC_check_cisco_ise.md#swap-live-test).
+
+`timesync` compares timezone-aware `hrSystemDate` to the midpoint of the SNMP request on the monitoring host. Warning/critical thresholds are absolute skew in seconds (defaults 5/30, independently overridable, no 100-second cap). It reports direction and `clock_skew` perfdata. Missing/invalid timestamps or timestamps without a timezone return UNKNOWN. Keep the monitoring host's clock accurate; request delay and device timestamp precision affect the estimate. This checks clock agreement, not NTP peer or synchronization health. Live `.11` queries confirmed system time with a UTC offset; NTPv4-MIB and CISCO-NTP-MIB returned `No Such Object`. The staged plugin was live-tested on 2026-11-03: OK/exit 0, 0.3s behind the monitor.
 
 Interface defaults omit `lo`, `podman*`, and `veth*`; `--include-interfaces` selects exact names and overrides those defaults, while `--exclude-interfaces` always omits exact names. An administratively enabled interface that is not operationally up is CRITICAL; administratively disabled interfaces are informational and admin-testing is WARNING. Speed, alias, errors, and discards are best-effort; counters do not affect status. Thresholds are not applicable to this mode.
 
@@ -87,8 +98,8 @@ Perl plugin that monitors BGP and EIGRP routing peer status via SNMP. It auto-de
 
 **Usage:**
 ```bash
-./check_bgp_peer.pl --hostname <HOST> --community <COMMUNITY>
-./check_bgp_peer.pl --hostname <HOST> --version 3 --username <USER> --authproto SHA --authpass <PASS> --privproto AES --privpass <PASS>
+./scripts/check_bgp_peer.pl --hostname <HOST> --community <COMMUNITY>
+./scripts/check_bgp_peer.pl --hostname <HOST> --version 3 --username <USER> --authproto SHA --authpass <PASS> --privproto AES --privpass <PASS>
 ```
 
 **Output example:**
@@ -122,9 +133,9 @@ PowerShell plugin that inspects all non-self-signed certificates in the Windows 
 
 **Usage:**
 ```powershell
-.\check_cert_expiry.ps1
-.\check_cert_expiry.ps1 -WarningDays 60 -CriticalDays 30
-.\check_cert_expiry.ps1 -ShowOnlyProblems
+.\scripts\check_cert_expiry.ps1
+.\scripts\check_cert_expiry.ps1 -WarningDays 60 -CriticalDays 30
+.\scripts\check_cert_expiry.ps1 -ShowOnlyProblems
 ```
 
 **Output example:**
@@ -148,8 +159,8 @@ check_cert_expiry = cmd /c powershell.exe -ExecutionPolicy Bypass -NonInteractiv
 
 ### `check_cisco_wlc_ha.pl`
 
-See [OIDS_check_cisco_wlc_ha.md](OIDS_check_cisco_wlc_ha.md) for the OIDs and state meanings used by this check.
-For a plain-language explanation, see [How the check works](LOGIC_check_cisco_wlc_ha.md).
+See [OIDS_check_cisco_wlc_ha.md](docs/OIDS_check_cisco_wlc_ha.md) for the OIDs and state meanings used by this check.
+For a plain-language explanation, see [How the check works](docs/LOGIC_check_cisco_wlc_ha.md).
 
 Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via SNMP. It first queries CISCO-RF-MIB to determine the local unit's role (`active`, `standbyHot`, or transitional states like `initialization`/`negotiation`), RF duplex mode (peer detected or not), peer unit state, and last switchover reason. When the local unit is **active**, it additionally queries CISCO-LWAPP-HA-MIB (`cLHaPeerHotStandbyEvent`) to verify HA peer reachability. When the local unit is **standbyHot**, it skips the LWAPP-HA check (only meaningful on the active) and validates that the peer is in `active` state. Transitional/abnormal local states trigger WARNING by default. Supports two escalation modes: `--strict` escalates peer-state mismatches and transitional states to CRITICAL, while `--hard-strict` (superset) escalates any anomaly including LWAPP-HA read failures to CRITICAL with no UNKNOWN/WARNING fallbacks. Optionally, `--ap-serial` walks the AP table (CISCO-LWAPP-AP-MIB with automatic fallback to AIRESPACE-WIRELESS-MIB) and appends each AP name and serial number to the output, useful for inventory and initial discovery. Outputs Nagios-format status with performance data for trending (`peer_up`, `duplex`, `unit_state`, `peer_state`, `last_swact_reason`).
 
@@ -177,10 +188,10 @@ Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via
 
 **Usage:**
 ```bash
-./check_cisco_wlc_ha.pl --host <WLC-IP> --version 3 --secname <SNMPv3-USER> --authpass '<AUTH-PASSWORD>' --privpass '<PRIVACY-PASSWORD>' --timeout 10
-./check_cisco_wlc_ha.pl --host <WLC-IP> --version 2c --community '<COMMUNITY>' --timeout 10
-./check_cisco_wlc_ha.pl --host <WLC-IP> --version 3 --secname <SNMPv3-USER> --authpass '<AUTH-PASSWORD>' --privpass '<PRIVACY-PASSWORD>' --strict
-./check_cisco_wlc_ha.pl --host <WLC-IP> --version 2c --community '<COMMUNITY>' --timeout 10 --ap-serial
+./scripts/check_cisco_wlc_ha.pl --host <WLC-IP> --version 3 --secname <SNMPv3-USER> --authpass '<AUTH-PASSWORD>' --privpass '<PRIVACY-PASSWORD>' --timeout 10
+./scripts/check_cisco_wlc_ha.pl --host <WLC-IP> --version 2c --community '<COMMUNITY>' --timeout 10
+./scripts/check_cisco_wlc_ha.pl --host <WLC-IP> --version 3 --secname <SNMPv3-USER> --authpass '<AUTH-PASSWORD>' --privpass '<PRIVACY-PASSWORD>' --strict
+./scripts/check_cisco_wlc_ha.pl --host <WLC-IP> --version 2c --community '<COMMUNITY>' --timeout 10 --ap-serial
 ```
 
 **Output example:**
@@ -216,9 +227,9 @@ PowerShell plugin that checks Puppet SSL certificate expiry and reports Nagios-f
 
 **Usage:**
 ```powershell
-.\check_puppet_certs.ps1
-.\check_puppet_certs.ps1 -WarningDays 60 -CriticalDays 14
-.\check_puppet_certs.ps1 -PuppetSslDir "C:\ProgramData\PuppetLabs\puppet\etc\ssl"
+.\scripts\check_puppet_certs.ps1
+.\scripts\check_puppet_certs.ps1 -WarningDays 60 -CriticalDays 14
+.\scripts\check_puppet_certs.ps1 -PuppetSslDir "C:\ProgramData\PuppetLabs\puppet\etc\ssl"
 ```
 
 **Output example:**
@@ -248,7 +259,7 @@ PowerShell plugin that reports the Windows version, build number, and patch leve
 
 **Usage:**
 ```powershell
-.\get_patch_level.ps1
+.\scripts\get_patch_level.ps1
 ```
 
 **Output example:**
@@ -267,7 +278,7 @@ check_patch_level = powershell.exe -ExecutionPolicy Bypass -File "scripts\get_pa
 
 ### `check_cisco_firewall.py`
 
-Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_firewall.md); for numeric OIDs and detailed state mappings, see [OIDS_check_cisco_firewall.md](OIDS_check_cisco_firewall.md).
+Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SNMP. Supports failover status, CPU, memory, connections, uptime, HA role/state (local and peer), sysinfo, fan tray/power supply hardware health, and interface admin/oper status. Uses the shared [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](docs/LOGIC_check_cisco_firewall.md); for numeric OIDs and detailed state mappings, see [OIDS_check_cisco_firewall.md](docs/OIDS_check_cisco_firewall.md).
 
 | Feature | Detail |
 |---|---|
@@ -288,7 +299,7 @@ Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SN
 
 **Usage:**
 ```bash
-./check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--peer-hostname <host>] [-w/--warning <n>] [-c/--critical <n>]
+./scripts/check_cisco_firewall.py -H <host> -C <community> --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces [--peer-hostname <host>] [-w/--warning <n>] [-c/--critical <n>]
 ```
 
 **Output example:**
@@ -302,7 +313,7 @@ OK - Role=ACTIVE(active); HA Peer: reachable | peer_up=1
 
 ### `check_cisco_fmc.py`
 
-Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SNMP. FMC is a Linux (Yocto) appliance rather than an IOS/ASA platform, so it uses HOST-RESOURCES-MIB instead of the ASA-specific CISCO-PROCESS-MIB/CISCO-MEMORY-POOL-MIB. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_fmc.md); for numeric OIDs, table details, and live-tested examples, see [OIDS_check_cisco_fmc.md](OIDS_check_cisco_fmc.md).
+Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SNMP. FMC is a Linux (Yocto) appliance rather than an IOS/ASA platform, so it uses HOST-RESOURCES-MIB instead of the ASA-specific CISCO-PROCESS-MIB/CISCO-MEMORY-POOL-MIB. Uses the shared [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](docs/LOGIC_check_cisco_fmc.md); for numeric OIDs, table details, and live-tested examples, see [OIDS_check_cisco_fmc.md](docs/OIDS_check_cisco_fmc.md).
 
 | Feature | Detail |
 |---|---|
@@ -327,8 +338,8 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 
 **Usage:**
 ```bash
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community> --mode <mode> [options]
-./check_cisco_fmc.py -H $HOSTADDRESS$ --user <user> --mode <mode> [SNMPv3 options]
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community> --mode <mode> [options]
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ --user <user> --mode <mode> [SNMPv3 options]
 # Modes: cpu, memory, swap, disk, timesync, sysinfo
 ```
 
@@ -343,12 +354,12 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | `timesync` | 5 seconds | 30 seconds | Compares the FMC clock against the monitoring host; requires an accurate monitoring host clock. |
 
 ```bash
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk --include-mounts /,/var,/var/lib/mysql --exclude-mounts /dev/shm
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode timesync -w 5 -c 30
-./check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode sysinfo
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode cpu
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode memory
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode swap
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode disk --include-mounts /,/var,/var/lib/mysql --exclude-mounts /dev/shm
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode timesync -w 5 -c 30
+./scripts/check_cisco_fmc.py -H $HOSTADDRESS$ -C <community string> --mode sysinfo
 ```
 
 `timesync` measures clock skew via `hrSystemDate`, not which NTP peer the FMC uses or whether its NTP daemon is synchronized. Live probes on `10.56.1.221` found no NTP peer/status MIB, but did find a populated system clock (timesync returned OK at 0.4s skew). `sysinfo` uses `sysName` and `sysDescr` plus the ENTITY-MIB chassis row: model `FS-VMW-SW-K9` was reported, but serial was empty and is shown as `unavailable`. Missing optional hardware data does not fail this informational mode; missing hostname/description returns UNKNOWN.
@@ -372,7 +383,7 @@ OK - Disk usage (worst: /=51.8%) | disk=51.8%;80.0;90.0;0;100 ...
 
 ### `check_cisco_wlc.py`
 
-Lists Cisco WLC interfaces, component serial numbers and Smart Licensing entitlements, and checks interface/license health and traffic usage via IF-MIB, ENTITY-MIB, CISCO-RF-MIB and CISCO-SMART-LIC-MIB using the shared [ves_snmp_utils.py](ves_snmp_utils.py) module. Supports SNMPv2c and SNMPv3.
+Lists Cisco WLC interfaces, component serial numbers and Smart Licensing entitlements, and checks interface/license health and traffic usage via IF-MIB, ENTITY-MIB, CISCO-RF-MIB and CISCO-SMART-LIC-MIB using the shared [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module. Supports SNMPv2c and SNMPv3.
 
 **Live software-version discovery (2026-10-14):** both `172.23.36.12` and `172.23.36.13` reported C9800-CL IOS-XE `17.15.6`, release build `fc2`, compiled `22-Jul-2026 03:38`. ENTITY-MIB reported component software revision `17.15.06` on `module R0` (index 20) and `module F0` (index 40) on both units. The leading zero is a formatting difference, not evidence of another release. Firmware revisions were empty except for `Unknown` on F0; they do not identify the running IOS-XE version.
 
@@ -391,7 +402,7 @@ snmpwalk -v2c -c '<community>' 172.23.36.12 1.3.6.1.2.1.47.1.1.1.1.10
 
 Repeat with `.13` to check the second unit. These are discovery results, not a `--mode` implemented by this plugin; there is no version-comparison, upgrade-compliance or version-mismatch alarm. Both units also reported the same `sysName`, so identify query results by target IP, not hostname alone.
 
-For the decision flow, rate formulas, numeric OIDs and limitations, see [How the WLC check works](LOGIC_check_cisco_wlc.md). This is a read-only Nagios/Naemon-compatible plugin for Cisco C9800 WLCs; it does not change interface configuration. Keep the script and shared helper in the same directory. The shebang uses `/opt/rh/rh-python38/root/usr/bin/python3`; direct execution requires executable permission and LF line endings.
+For the decision flow, rate formulas, numeric OIDs and limitations, see [How the WLC check works](docs/LOGIC_check_cisco_wlc.md). This is a read-only Nagios/Naemon-compatible plugin for Cisco C9800 WLCs; it does not change interface configuration. The packaged deployment keeps the script and shared helper in the same directory. The shebang uses `/opt/rh/rh-python38/root/usr/bin/python3`; direct execution requires executable permission and LF line endings.
 
 | Mode | Purpose | HA behavior |
 |---|---|---|
@@ -424,24 +435,24 @@ For the decision flow, rate formulas, numeric OIDs and limitations, see [How the
 There are no `-H`/`-C` aliases. `--interval`, `-w` and `-c` affect only usage mode; `--include-interfaces` is rejected in other modes. Prefer environment variables over password options to avoid exposing SNMPv3 passwords in process listings. Explicit password options take precedence.
 
 ```bash
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-interfaces
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-serial-numbers
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-licenses
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode license-health
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-health
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --interval 5 -w 80 -c 90
-./check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --include-interfaces Gi2
-./check_cisco_wlc.py --hostname <WLC-IP> --user <user> --mode list-interfaces
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-interfaces
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-serial-numbers
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-licenses
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode license-health
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-health
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --interval 5 -w 80 -c 90
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode interface-usage --include-interfaces Gi2
+./scripts/check_cisco_wlc.py --hostname <WLC-IP> --user <user> --mode list-interfaces
 ```
 
 Examples for the observed pair (replace the community placeholder):
 
 ```bash
-./check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode list-interfaces
-./check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode interface-health
-./check_cisco_wlc.py --hostname 172.23.36.13 --community '<community>' --mode interface-usage --include-interfaces Gi2
-./check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode interface-usage --include-interfaces GigabitEthernet2,Vlan2555 --interval 10 -w 70 -c 85
-./check_cisco_wlc.py --hostname 172.23.36.12 --user '<user>' --seclevel authPriv --mode interface-health
+./scripts/check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode list-interfaces
+./scripts/check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode interface-health
+./scripts/check_cisco_wlc.py --hostname 172.23.36.13 --community '<community>' --mode interface-usage --include-interfaces Gi2
+./scripts/check_cisco_wlc.py --hostname 172.23.36.12 --community '<community>' --mode interface-usage --include-interfaces GigabitEthernet2,Vlan2555 --interval 10 -w 70 -c 85
+./scripts/check_cisco_wlc.py --hostname 172.23.36.12 --user '<user>' --seclevel authPriv --mode interface-health
 ```
 
 For the last example, set `SNMP_AUTHPW` and `SNMP_PRIVPW` in the execution environment. No password values are built into the plugin.
@@ -516,13 +527,13 @@ The first line contains the status and perfdata after `|`. Subsequent pipe-delim
 
 If a usage row cannot be evaluated, the result is UNKNOWN even when another row is WARNING; a confirmed CRITICAL row takes precedence. Request/uptime/SNMP failures that abort sampling return immediately. Missing required command-line options or invalid argparse values use argparse's own error/exit 2, not a Nagios UNKNOWN summary. No arguments prints help and exits 3.
 
-Troubleshooting: use `list-interfaces` to find exact names; use `--include-interfaces Gi2` when intentionally monitoring only the uplink; retain UNKNOWN handling for counters that decrease. A health-mode standby skip does not certify physical links or HA peer health. A successful SNMP walk or low usage does not prove forwarding is healthy. See the LOGIC guide for the observed `.13` VLAN counter issue and validation scope. NTP monitoring remains a separate [plugin](check_cisco_wlc_ntp.py).
+Troubleshooting: use `list-interfaces` to find exact names; use `--include-interfaces Gi2` when intentionally monitoring only the uplink; retain UNKNOWN handling for counters that decrease. A health-mode standby skip does not certify physical links or HA peer health. A successful SNMP walk or low usage does not prove forwarding is healthy. See the LOGIC guide for the observed `.13` VLAN counter issue and validation scope. NTP monitoring remains a separate [plugin](scripts/check_cisco_wlc_ntp.py).
 
 ---
 
 ### `check_cisco_wlc_ntp.py`
 
-Python plugin that checks the NTP synchronization state of a Cisco C9800 WLC via the standard NTPv4-MIB (`1.3.6.1.2.1.197`). Reports the device's own sync mode, stratum, active offset and per-peer stratum, so an unsynchronized WLC is flagged CRITICAL. Uses the shared [ves_snmp_utils.py](ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](LOGIC_check_cisco_wlc_ntp.md).
+Python plugin that checks the NTP synchronization state of a Cisco C9800 WLC via the standard NTPv4-MIB (`1.3.6.1.2.1.197`). Reports the device's own sync mode, stratum, active offset and per-peer stratum, so an unsynchronized WLC is flagged CRITICAL. Uses the shared [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module for all SNMP access. For a plain-language walkthrough, see [How the check works](docs/LOGIC_check_cisco_wlc_ntp.md).
 
 | Feature | Detail |
 |---|---|
@@ -555,7 +566,7 @@ Stratum is a server's distance from a primary time source. The plugin applies it
 
 **Usage:**
 ```bash
-./check_cisco_wlc_ntp.py --hostname <WLC-IP> --community <community> [-w <ms>] [-c <ms>] [--min-peers <n>]
+./scripts/check_cisco_wlc_ntp.py --hostname <WLC-IP> --community <community> [-w <ms>] [-c <ms>] [--min-peers <n>]
 ```
 
 **Output example:**

@@ -1,10 +1,10 @@
 # check_cisco_firewall.py — OIDs, tables and status meanings per mode
 
-SNMP OIDs used by [check_cisco_firewall.py](check_cisco_firewall.py), sourced from the shared `OIDS` dict in [ves_snmp_utils.py](ves_snmp_utils.py). Target platforms: ASA / FTD / Secure Firewall 3100 (e.g. Firepower 3110).
+SNMP OIDs used by [check_cisco_firewall.py](../scripts/check_cisco_firewall.py), sourced from the shared `OIDS` dict in [ves_snmp_utils.py](../scripts/ves_snmp_utils.py). Target platforms: ASA / FTD / Secure Firewall 3100 (e.g. Firepower 3110).
 
 ## Nagios exit codes
 
-Every mode ultimately maps its SNMP result onto the standard Nagios exit codes (`NAGIOS_STATUS` in [ves_snmp_utils.py](ves_snmp_utils.py)):
+Every mode ultimately maps its SNMP result onto the standard Nagios exit codes (`NAGIOS_STATUS` in [ves_snmp_utils.py](../scripts/ves_snmp_utils.py)):
 
 | Exit code | Status | Meaning |
 |---|---|---|
@@ -296,7 +296,7 @@ Filtering by `entPhysicalClass` (rather than matching keywords in `entPhysicalDe
 | `3` | `down` | Fan tray present but not operating / failed | WARNING (downgraded — see note) |
 | `4` | `warning` | Fan tray operating outside normal parameters (degraded) | CRITICAL |
 
-Note: `down(3)` is deliberately downgraded to WARNING instead of CRITICAL because production Secure Firewall 3100 / FTD 7.4.2 units have been observed consistently reporting `down(3)` for the fan tray even when the hardware is otherwise healthy. `warning(4)` is kept at CRITICAL since it reflects a real problem. See `FAN_TRAY_STATUS_MAP`/`FAN_TRAY_STATUS_SEVERITY` in [check_cisco_firewall.py](check_cisco_firewall.py).
+Note: `down(3)` is deliberately downgraded to WARNING instead of CRITICAL because production Secure Firewall 3100 / FTD 7.4.2 units have been observed consistently reporting `down(3)` for the fan tray even when the hardware is otherwise healthy. `warning(4)` is kept at CRITICAL since it reflects a real problem. See `FAN_TRAY_STATUS_MAP`/`FAN_TRAY_STATUS_SEVERITY` in [check_cisco_firewall.py](../scripts/check_cisco_firewall.py).
 
 ### cefcFRUPowerOperStatus value meanings (CISCO-ENTITY-FRU-CONTROL-MIB `PowerOperType`)
 

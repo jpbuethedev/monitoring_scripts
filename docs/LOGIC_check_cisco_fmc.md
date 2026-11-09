@@ -78,4 +78,4 @@ For metric modes, text before `|` is the readable result and text after it is pe
 OK - Average CPU usage: 3.2% (cpu196608=2%, cpu196609=4%) | cpu_avg=3.2%;85.0;95.0;0;100
 ```
 
-The threshold values can be overridden per invocation. Disk mount filters apply only to disk mode. For the numeric OIDs, table columns, and live-tested examples, see the [FMC OID reference](OIDS_check_cisco_fmc.md) and the [monitoring scripts README](README.md#check_cisco_fmc.py).
+The threshold values can be overridden per invocation. Disk mount filters apply only to disk mode. For the numeric OIDs, table columns, and live-tested examples, see the [FMC OID reference](OIDS_check_cisco_fmc.md) and the [monitoring scripts README](../README.md#check_cisco_fmc.py).

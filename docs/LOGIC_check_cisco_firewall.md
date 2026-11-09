@@ -78,4 +78,4 @@ Link speed and error/discard counters are informational only and do not change i
 | `2` | CRITICAL | A critical threshold, unsafe HA state, failed component, or down interface was detected. |
 | `3` | UNKNOWN | Required data is missing, the request lacks credentials, or the plugin cannot determine a result. |
 
-These rules are mode-specific. For example, an SNMP-unreachable device is UNKNOWN in checks using the shared SNMP helper, but `ha_pair` explicitly reports an unreachable queried unit as CRITICAL. See the [firewall OID reference](OIDS_check_cisco_firewall.md) for exact OIDs, state maps, exclusions, and examples, and the [monitoring scripts README](README.md) for invocation examples.
+These rules are mode-specific. For example, an SNMP-unreachable device is UNKNOWN in checks using the shared SNMP helper, but `ha_pair` explicitly reports an unreachable queried unit as CRITICAL. See the [firewall OID reference](OIDS_check_cisco_firewall.md) for exact OIDs, state maps, exclusions, and examples, and the [monitoring scripts README](../README.md) for invocation examples.
