@@ -1,10 +1,10 @@
 # check_cisco_fmc.py — OIDs, tables and status meanings per mode
 
-SNMP OIDs used by [check_cisco_fmc.py](check_cisco_fmc.py), sourced from the shared `OIDS` dict in [ves_snmp_utils.py](ves_snmp_utils.py). Target platform: Cisco Secure Firewall Management Center (FMC). Unlike [check_cisco_firewall.py](check_cisco_firewall.py)'s ASA/FTD targets, FMC is a Linux (Yocto) appliance, so it exposes CPU/memory/disk via the standard **HOST-RESOURCES-MIB** rather than the IOS-only CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB.
+SNMP OIDs used by [check_cisco_fmc.py](../scripts/check_cisco_fmc.py), sourced from the shared `OIDS` dict in [ves_snmp_utils.py](../scripts/ves_snmp_utils.py). Target platform: Cisco Secure Firewall Management Center (FMC). Unlike [check_cisco_firewall.py](../scripts/check_cisco_firewall.py)'s ASA/FTD targets, FMC is a Linux (Yocto) appliance, so it exposes CPU/memory/disk via the standard **HOST-RESOURCES-MIB** rather than the IOS-only CISCO-PROCESS-MIB / CISCO-MEMORY-POOL-MIB.
 
 ## Nagios exit codes
 
-Every mode maps its SNMP result onto the standard Nagios exit codes (`NAGIOS_STATUS` in [ves_snmp_utils.py](ves_snmp_utils.py)):
+Every mode maps its SNMP result onto the standard Nagios exit codes (`NAGIOS_STATUS` in [ves_snmp_utils.py](../scripts/ves_snmp_utils.py)):
 
 | Exit code | Status | Meaning |
 |---|---|---|

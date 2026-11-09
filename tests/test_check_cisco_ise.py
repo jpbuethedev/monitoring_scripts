@@ -9,6 +9,11 @@ from datetime import datetime, timedelta, timezone
 from pysnmp.proto.rfc1902 import OctetString
 from unittest.mock import patch
 
+REPOSITORY_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+ISE_SCRIPT_DIR = os.path.join(REPOSITORY_ROOT, "scripts")
+sys.path.insert(0, REPOSITORY_ROOT)
+sys.path.insert(0, ISE_SCRIPT_DIR)
+
 import check_cisco_ise as ise
 import ves_snmp_utils as snmp
 

@@ -1,5 +1,6 @@
-check_cisco_fmc.py text eol=lf
-check_cisco_wlc_ntp.py text eol=lf
-check_cisco_wlc.py text eol=lf
-check_cisco_ise.py text eol=lf
+scripts/*.py text eol=lf
+docs/*.md text eol=lf
+scripts/check_bgp_peer.pl -text
+scripts/check_cert_expiry.ps1 -text
+scripts/get_patch_level.ps1 -text
 tests/test_check_cisco_ise.py text eol=lf

@@ -62,7 +62,7 @@ read -r -s -p 'SNMP community (hidden): ' SNMP_COMMUNITY
 printf '\n'
 export SNMP_COMMUNITY
 snmpget -v2c -c "$SNMP_COMMUNITY" -t 5 -r 0 -On 172.23.38.11 1.3.6.1.4.1.2021.4.3.0 1.3.6.1.4.1.2021.4.4.0
-/opt/rh/rh-python38/root/usr/bin/python3 ./check_cisco_ise.py -H 172.23.38.11 --mode swap -w 80 -c 90
+/opt/rh/rh-python38/root/usr/bin/python3 ./scripts/check_cisco_ise.py -H 172.23.38.11 --mode swap -w 80 -c 90
 printf 'Plugin exit=%s\n' "$?"
 unset SNMP_COMMUNITY
 ```

@@ -2,9 +2,9 @@
 
 ## In plain language
 
-[check_cisco_wlc.py](check_cisco_wlc.py) reads interface inventory, component serial numbers, link states, traffic counters and Smart Licensing data from a Cisco C9800 WLC using [ves_snmp_utils.py](ves_snmp_utils.py). It never changes the device. The six modes separate inventory from health evaluation for interfaces and licenses. These are not end-to-end forwarding, wireless client or subscription-validity tests.
+[check_cisco_wlc.py](../scripts/check_cisco_wlc.py) reads interface inventory, component serial numbers, link states, traffic counters and Smart Licensing data from a Cisco C9800 WLC using [ves_snmp_utils.py](../scripts/ves_snmp_utils.py). It never changes the device. The six modes separate inventory from health evaluation for interfaces and licenses. These are not end-to-end forwarding, wireless client or subscription-validity tests.
 
-For options and invocation examples, see the [README](README.md). NTP synchronization remains in [check_cisco_wlc_ntp.py](check_cisco_wlc_ntp.py).
+For options and invocation examples, see the [README](../README.md). NTP synchronization remains in [check_cisco_wlc_ntp.py](../scripts/check_cisco_wlc_ntp.py).
 
 ## Common execution flow
 
@@ -212,7 +212,7 @@ Both descriptions identified C9800-CL software and compilation time `Wed 22-Jul-
 
 Chassis software revisions and most firmware revisions were empty; F0 firmware was the literal `Unknown` on both units. Component indices above are observed data, not hard-coded discovery rules. Both units returned the same `sysName` (`SP-99941-VES-ESX11-WLC1.localwpp.net`), so IP and the previously discovered local chassis serial distinguish the query targets.
 
-The snapshot confirms what SNMP reported at query time, not current vendor support, recommended upgrade level, vulnerability exposure or ongoing HA version agreement. The plugin does not compare against an expected release, compare peers or alarm on version differences. See the [README](README.md) for manual query commands.
+The snapshot confirms what SNMP reported at query time, not current vendor support, recommended upgrade level, vulnerability exposure or ongoing HA version agreement. The plugin does not compare against an expected release, compare peers or alarm on version differences. See the [README](../README.md) for manual query commands.
 
 ## Operational limits
 
