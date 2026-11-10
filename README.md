@@ -8,27 +8,9 @@ A collection of Perl plugins, and PowerShell monitoring scripts used for WPP inf
 
 Nagios/Icinga-compatible plugins designed for use with NSClient++ or NRPE.
 
-### [check_cisco_ise.py](scripts/check_cisco_ise.py)
+### [check_cisco_ise.py](scripts/check_cisco_ise.py) (SNMP)
 
-Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Requires Python 3.8, classic `pysnmp==4.4.12`, `pyasn1==0.4.8`, and `pycryptodomex`, using the existing [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module. See [check logic](docs/LOGIC_check_cisco_ise.md) and [OID reference](docs/OIDS_check_cisco_ise.md).
-
-### [check_cisco_ise_api.py](scripts/check_cisco_ise_api.py)
-
-Cisco ISE monitoring through its HTTPS API. This Python 3.8+ plugin uses only
-the standard library and provides `deployment`, `certificates`, `backup`,
-`licenses`, `pan-ha`, `version`, `tasks`, and `ldap-bind` modes. Checks use
-GET requests except `ldap-bind`, which actively runs a configured LDAP bind
-test via a dedicated PUT request. TLS verification is enabled by default.
-
-```text
-./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode deployment
-./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode ldap-bind --ldap-name NAME
-```
-
-Use `ISE_API_USERNAME` and `ISE_API_PASSWORD` for unattended monitoring rather
-than exposing passwords in process arguments. `--ca-file` configures a trusted
-CA bundle; `--insecure` disables TLS verification and should be limited to
-diagnostics. See the [API check logic and full option guide](docs/LOGIC_check_cisco_ise_api.md).
+Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Requires Python 3.8, classic `pysnmp==4.4.12`, `pyasn1==0.4.8`, and `pycryptodomex`, using the existing [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module. See [check logic](docs/LOGIC_check_cisco_ise.md) and [OID reference](docs/OIDS_check_cisco_ise.md). Its `--mode` values and SNMP options belong to this plugin only; the HTTPS API check below is a separate plugin with its own modes and options.
 
 ```text
 ./scripts/check_cisco_ise.py -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]
@@ -90,6 +72,25 @@ Interface defaults omit `lo`, `podman*`, and `veth*`; `--include-interfaces` sel
 `-C/--community` overrides `SNMP_COMMUNITY`. SNMPv3 uses `--user`, `--seclevel`, `--auth`, `--authpw`, `--priv`, `--privpw`; passwords may instead use `SNMP_AUTHPW` and `SNMP_PRIVPW`. Explicit CLI credentials take precedence. Environment variables avoid command-line/history exposure but must still be protected. `-t/--timeout` defaults to 5 seconds per SNMP request, not a whole-check deadline. `-v/--verbose` adds processor/mount detail after the status/perfdata line. Missing or invalid required metrics and timeouts return UNKNOWN; other SNMP failures retain shared-helper severity. This does not monitor RADIUS/TACACS+ authentication, personas, replication, or application readiness.
 
 The seven modes preceding `memory_usage` were live-tested against instance 1 (`172.23.38.11`) on Python 3.8/PySNMP 4.4.12. UCD-SNMP counters for `memory_usage` were discovered there, but the new plugin mode has not been run live. The deployed `serial-numbers` mode returned one component (`Cisco Application Deployment Engine`, model `ISE-VM-K9`) and OK. Instance 2 (`172.23.38.12`) timed out during discovery. Run focused tests from the repository root with `python -B -m unittest discover -s tests -p test_check_cisco_ise.py`.
+
+### [check_cisco_ise_api.py](scripts/check_cisco_ise_api.py) (HTTPS API)
+
+This is a separate Python 3.8+ plugin using only the standard library. Its mode
+set is `deployment`, `certificates`, `backup`, `licenses`, `pan-ha`, `version`,
+`tasks`, and `ldap-bind`; these modes and options are independent of
+`check_cisco_ise.py`. Requests use GET except `ldap-bind`, which actively runs a
+configured LDAP bind test via a dedicated PUT request. TLS verification is
+enabled by default.
+
+```text
+./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode deployment
+./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode ldap-bind --ldap-name NAME
+```
+
+Use `ISE_API_USERNAME` and `ISE_API_PASSWORD` for unattended monitoring rather
+than exposing passwords in process arguments. `--ca-file` configures a trusted
+CA bundle; `--insecure` disables TLS verification and should be limited to
+diagnostics. See the [API check logic and full option guide](docs/LOGIC_check_cisco_ise_api.md).
 
 ### `check_bgp_peer.pl`
 
