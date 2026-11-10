@@ -87,6 +87,17 @@ enabled by default.
 ./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode ldap-bind --ldap-name NAME
 ```
 
+| API plugin mode | Behavior | Default warning / critical |
+|---|---|---|
+| `deployment` | Checks deployment node status; optionally enforces `--expected-nodes` | No thresholds |
+| `certificates` | Checks system-certificate validity on discovered nodes or repeated `--node` selections | 30 / 10 days remaining |
+| `backup` | Checks the latest configuration-backup status and age since start | 48 / 72 hours |
+| `licenses` | Checks enabled-tier compliance and evaluation time remaining | 30 / 10 evaluation days |
+| `pan-ha` | Compares automatic failover configuration with `--expect-ha` (default `enabled`) | No thresholds |
+| `version` | Reports the API endpoint's release and patch inventory; optional exact expectations | No thresholds |
+| `tasks` | Checks resource failures and age of unfinished tasks; optional repeated `--task-id` | 30 / 60 minutes |
+| `ldap-bind` | Actively tests the configured primary and/or secondary LDAP bind via PUT | No thresholds |
+
 Use `ISE_API_USERNAME` and `ISE_API_PASSWORD` for unattended monitoring rather
 than exposing passwords in process arguments. `--ca-file` configures a trusted
 CA bundle; `--insecure` disables TLS verification and should be limited to
