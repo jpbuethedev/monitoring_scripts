@@ -12,6 +12,24 @@ Nagios/Icinga-compatible plugins designed for use with NSClient++ or NRPE.
 
 Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Requires Python 3.8, classic `pysnmp==4.4.12`, `pyasn1==0.4.8`, and `pycryptodomex`, using the existing [ves_snmp_utils.py](scripts/ves_snmp_utils.py) module. See [check logic](docs/LOGIC_check_cisco_ise.md) and [OID reference](docs/OIDS_check_cisco_ise.md).
 
+### [check_cisco_ise_api.py](scripts/check_cisco_ise_api.py)
+
+Cisco ISE monitoring through its HTTPS API. This Python 3.8+ plugin uses only
+the standard library and provides `deployment`, `certificates`, `backup`,
+`licenses`, `pan-ha`, `version`, `tasks`, and `ldap-bind` modes. Checks use
+GET requests except `ldap-bind`, which actively runs a configured LDAP bind
+test via a dedicated PUT request. TLS verification is enabled by default.
+
+```text
+./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode deployment
+./scripts/check_cisco_ise_api.py -H HOST -u USER --ask-password --mode ldap-bind --ldap-name NAME
+```
+
+Use `ISE_API_USERNAME` and `ISE_API_PASSWORD` for unattended monitoring rather
+than exposing passwords in process arguments. `--ca-file` configures a trusted
+CA bundle; `--insecure` disables TLS verification and should be limited to
+diagnostics. See the [API check logic and full option guide](docs/LOGIC_check_cisco_ise_api.md).
+
 ```text
 ./scripts/check_cisco_ise.py -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]
 ./scripts/check_cisco_ise.py --hostname HOST [--community COMMUNITY] [--port PORT] [--timeout SECONDS] --mode MODE [OPTIONS]

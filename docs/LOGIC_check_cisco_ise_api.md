@@ -17,6 +17,15 @@ check_cisco_ise_api.py --hostname HOST --username USER --password PASSWORD --mod
 The plugin selects the API path for the requested mode. `-p` is the password;
 uppercase `-P` remains the HTTPS port.
 
+## Output And Exit Codes
+
+Each completed check prints one Nagios-compatible status line in the form
+`STATUS - summary | performance-data`. Exit codes are `0` for OK, `1` for
+WARNING, `2` for CRITICAL, and `3` for UNKNOWN. Configuration, API, TLS,
+transport, and response-validation errors return UNKNOWN; credentials and raw
+LDAP bind response messages are not included in output. Performance-data
+metrics are mode-specific and are described in each section below.
+
 | Mode | Endpoint | Default warning / critical |
 |---|---|---|
 | deployment | `/api/v1/deployment/node` | Node status, no numeric thresholds |
