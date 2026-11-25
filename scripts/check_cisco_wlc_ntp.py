@@ -18,9 +18,8 @@
 
 import argparse
 import ipaddress
-import os
 import sys
-from ves_snmp_utils import NAGIOS_STATUS, OIDS, add_snmp_args, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
+from ves_snmp_utils import NAGIOS_STATUS, OIDS, add_snmp_args, prepare_wlc_snmp_args, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
 
 # ntpEntStatusCurrentMode
 NTP_MODE = {
@@ -101,7 +100,7 @@ def _perf(offset_ms, warning, critical, stratum, usable, total, dispersion_ms):
 
 def main():
     parser = argparse.ArgumentParser(description="Check NTP synchronization state of a Cisco C9800 WLC via SNMP (NTPv4-MIB)")
-    add_snmp_args(parser, timeout_default=5)
+    add_snmp_args(parser, timeout_default=15, standard_aliases=True)
     parser.add_argument("-w", "--warning", type=float, default=100.0,
                         help="Warning threshold for the absolute clock offset in milliseconds (default 100)")
     parser.add_argument("-c", "--critical", type=float, default=500.0,
@@ -111,12 +110,10 @@ def main():
 
     args = parser.parse_args()
 
-    # fall back to env vars so SNMPv3 secrets don't have to appear in the process list
-    args.authpw = args.authpw or os.environ.get("SNMP_AUTHPW")
-    args.privpw = args.privpw or os.environ.get("SNMP_PRIVPW")
-
-    if not args.community and not args.user:
-        _unknown("No SNMP credentials provided (use --community or --user)")
+    try:
+        prepare_wlc_snmp_args(args)
+    except ValueError as error:
+        _unknown(str(error))
     if args.warning < 0 or args.critical < 0 or args.warning >= args.critical:
         _unknown(f"--warning ({args.warning:g}) must be non-negative and lower than --critical ({args.critical:g})")
     if args.min_peers < 0:

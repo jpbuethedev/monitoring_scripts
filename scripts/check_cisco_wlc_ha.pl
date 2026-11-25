@@ -42,28 +42,40 @@ my %SWACT_REASON = (
 # --- Options ---
 my %opt = (
   host        => undef,
-  version     => '3',      # prefer v3
+  version     => undef,
   community   => 'public',
   secname     => undef,
-  seclevel    => 'authPriv',
+  seclevel    => undef,
   authproto   => 'SHA',
   authpass    => undef,
   privproto   => 'AES',
   privpass    => undef,
-  timeout     => 5,
+  timeout     => 15,
   port        => 161,
+  verbose     => 0,
   strict      => 0,        # escalate unexpected states (peer-state mismatch, transitions) to CRITICAL
   hard_strict => 0,        # escalate ANY anomaly to CRITICAL (superset of --strict)
   ap_serial   => 0,        # also fetch and display all AP serial numbers
 );
 
 sub usage {
+  my ($exit_code) = @_;
   print <<"USAGE";
-Usage: $0 --host <ip> [--version 2c|3] [--community <str>]
-             [--secname <user> --seclevel noAuthNoPriv|authNoPriv|authPriv
-              --authproto SHA|MD5 --authpass <pass>
-              --privproto AES|DES --privpass <pass>]
-             [--timeout <sec>] [--port 161] [--strict] [--hard-strict] [--ap-serial]
+Usage: $0 -H <host> [-p 1|2c|3] [-C <community>] [-P <port>] [-t <seconds>]
+             [--username <user> --seclevel noAuthNoPriv|authNoPriv|authPriv
+              --authprotocol SHA|MD5 --authpassword <pass>
+              --privprotocol AES|AES128|DES|3DES|3DESDE --privpassword <pass>]
+             [--contextengineid <hex>] [--contextname <name>]
+             [-v] [--strict] [--hard-strict] [--ap-serial]
+
+SNMP defaults to v2c, port 161 and a 15-second per-request timeout. Supplying
+a username selects v3 unless a protocol is specified; the v3 security level
+is inferred from the passwords unless --seclevel is given. Legacy --host, --version
+<protocol>, --secname, --authproto, --authpass, --privproto and --privpass
+remain available. SNMP_AUTHPW and SNMP_PRIVPW provide password fallbacks.
+SNMPv3 shorthand: -C 'snmpv3,sha,authpass,aes,privpass,user[,engineid][,context]'
+Use an empty engine ID to specify only a context name. -v may be repeated 3 times.
+-?, --usage and -h, --help show help; -V, --version show plugin version.
 
 Examples:
   $0 --host 172.26.9.68 --version 3 --secname nagios --authpass 'AuthPass' --privpass 'PrivPass' --timeout 10
@@ -92,37 +104,112 @@ AP serial numbers (--ap-serial):
     output message. Useful for inventory and initial discovery.
 USAGE
   ;
-  exit 3;
+  exit(defined $exit_code ? $exit_code : 3);
 }
 
+Getopt::Long::Configure(qw(no_ignore_case bundling));
+for (my $index = 0; $index < @ARGV; $index++) {
+  if ($ARGV[$index] eq '--version' && ($index == $#ARGV || $ARGV[$index + 1] =~ /^-/)) {
+    $ARGV[$index] = '--plugin-version';
+  }
+}
+my ($help, $short_usage, $plugin_version);
 GetOptions(
-  'host=s'        => \$opt{host},
+  'host|hostname|H=s' => \$opt{host},
   'version=s'     => \$opt{version},
-  'community=s'   => \$opt{community},
-  'secname=s'     => \$opt{secname},
+  'protocol|p=s'  => \$opt{version},
+  'community|C=s' => \$opt{community},
+  'secname|username=s' => \$opt{secname},
   'seclevel=s'    => \$opt{seclevel},
-  'authproto=s'   => \$opt{authproto},
-  'authpass=s'    => \$opt{authpass},
-  'privproto=s'   => \$opt{privproto},
-  'privpass=s'    => \$opt{privpass},
-  'timeout=i'     => \$opt{timeout},
-  'port=i'        => \$opt{port},
+  'authproto|authprotocol=s' => \$opt{authproto},
+  'authpass|authpassword=s' => \$opt{authpass},
+  'privproto|privprotocol=s' => \$opt{privproto},
+  'privpass|privpassword=s' => \$opt{privpass},
+  'contextengineid=s' => \$opt{contextengineid},
+  'contextname=s' => \$opt{contextname},
+  'timeout|t=i'   => \$opt{timeout},
+  'port|P=i'      => \$opt{port},
+  'verbose|v+'    => \$opt{verbose},
+  'help|h'        => \$help,
+  'usage|?'       => \$short_usage,
+  'plugin-version|V' => \$plugin_version,
   'strict'        => \$opt{strict},
   'hard-strict'   => \$opt{hard_strict},
   'ap-serial'     => \$opt{ap_serial},
 ) or usage();
+if ($plugin_version) { print "$0 1.0\n"; exit 0; }
+if ($short_usage) { print "Usage: $0 -H <host> [-p 1|2c|3] [-C <community>] [SNMP options] [check options]\n"; exit 0; }
+usage(0) if $help;
+if (@ARGV) { print "UNKNOWN - Unexpected positional arguments\n"; exit 3; }
 usage() unless $opt{host};
+
+if ($opt{community} =~ /^snmpv3(.)/i) {
+  my $separator = $1;
+  my @fields = split /\Q$separator\E/, $opt{community}, -1;
+  if (@fields < 6 || @fields > 8 || lc($fields[0]) ne 'snmpv3' || !$fields[2] || !$fields[4] || !$fields[5] ||
+      (defined $opt{version} && $opt{version} ne '3') || defined $opt{secname} ||
+      defined $opt{authpass} || defined $opt{privpass} ||
+      (@fields > 6 && defined $opt{contextengineid}) || (@fields > 7 && defined $opt{contextname})) {
+    print "UNKNOWN - Invalid or conflicting SNMPv3 community shorthand\n"; exit 3;
+  }
+  @opt{qw(authproto authpass privproto privpass secname)} = @fields[1..5];
+  $opt{contextengineid} = $fields[6] if @fields > 6 && length $fields[6];
+  $opt{contextname} = $fields[7] if @fields > 7 && length $fields[7];
+  $opt{version} = '3';
+} elsif ($opt{community} =~ /^snmpv3$/i) {
+  print "UNKNOWN - Invalid SNMPv3 community shorthand\n"; exit 3;
+}
+$opt{version} //= defined $opt{secname} ? '3' : '2c';
+$opt{authpass} //= $ENV{SNMP_AUTHPW};
+$opt{privpass} //= $ENV{SNMP_PRIVPW};
+if ($opt{port} < 1 || $opt{port} > 65535 || $opt{timeout} <= 0 || $opt{verbose} > 3) {
+  print "UNKNOWN - Invalid port, timeout, or verbosity\n"; exit 3;
+}
+if (defined $opt{contextengineid}) {
+  my $hex_engine = $opt{contextengineid};
+  $hex_engine =~ s/^0x//i;
+  if ($hex_engine !~ /\A[0-9a-f]{10,64}\z/i || length($hex_engine) % 2) {
+    print "UNKNOWN - Context engine ID must be 5 to 32 bytes of hexadecimal\n"; exit 3;
+  }
+}
+if (defined $opt{contextname} && length($opt{contextname}) > 32) {
+  print "UNKNOWN - Context name must be at most 32 bytes\n"; exit 3;
+}
+if ($opt{version} ne '3' && (defined $opt{contextengineid} || defined $opt{contextname})) {
+  print "UNKNOWN - SNMP context requires SNMPv3\n"; exit 3;
+}
+if ($opt{version} eq '3') {
+  $opt{seclevel} //= $opt{privpass} ? 'authPriv' : $opt{authpass} ? 'authNoPriv' : 'noAuthNoPriv';
+  if (!$opt{secname} || lc($opt{authproto}) !~ /\A(?:sha|md5)\z/ || lc($opt{privproto}) !~ /\A(?:aes|aes128|des|3des|3desde|3desede)\z/) {
+    print "UNKNOWN - Invalid SNMPv3 username or protocol\n"; exit 3;
+  }
+  if (($opt{seclevel} eq 'authNoPriv' || $opt{seclevel} eq 'authPriv') && !$opt{authpass}) {
+    print "UNKNOWN - SNMPv3 authentication password is required\n"; exit 3;
+  }
+  if ($opt{seclevel} eq 'authPriv' && !$opt{privpass}) {
+    print "UNKNOWN - SNMPv3 privacy password is required\n"; exit 3;
+  }
+  $opt{privproto} = '3desede' if lc($opt{privproto}) eq '3desde';
+} elsif (defined $opt{secname}) {
+  print "UNKNOWN - --username requires SNMPv3\n"; exit 3;
+}
+print STDERR "SNMPv$opt{version} target=$opt{host} port=$opt{port} timeout=$opt{timeout}\n" if $opt{verbose};
+print STDERR "SNMPv3 security=$opt{seclevel} auth=$opt{authproto} privacy=$opt{privproto}\n" if $opt{verbose} > 1 && $opt{version} eq '3';
+print STDERR "SNMPv3 context name=".($opt{contextname} // '(default)')." engine=".($opt{contextengineid} // '(default)')."\n" if $opt{verbose} > 2 && $opt{version} eq '3';
+my %context;
+$context{-contextengineid} = $opt{contextengineid} if defined $opt{contextengineid};
+$context{-contextname} = $opt{contextname} if defined $opt{contextname};
 
 # Consolidated strict flag: true if --strict or --hard-strict is set
 my $is_strict = ($opt{hard_strict} || $opt{strict}) ? 1 : 0;
 
 # --- SNMP session ---
 my ($session, $error);
-if ($opt{version} eq '2c') {
+if ($opt{version} eq '1' || $opt{version} eq '2c') {
   ($session, $error) = Net::SNMP->session(
     -hostname  => $opt{host},
     -community => $opt{community},
-    -version   => 2,
+    -version   => $opt{version} eq '1' ? 1 : 2,
     -timeout   => $opt{timeout},
     -port      => $opt{port},
   );
@@ -134,16 +221,13 @@ if ($opt{version} eq '2c') {
     -timeout   => $opt{timeout},
     -port      => $opt{port},
   );
-  if ($opt{seclevel} eq 'noAuthNoPriv') {
-    $v3{-security} = 'noAuthNoPriv';
-  } elsif ($opt{seclevel} eq 'authNoPriv') {
-    $v3{-security}     = 'authNoPriv';
+  if ($opt{seclevel} eq 'authNoPriv' || $opt{seclevel} eq 'authPriv') {
     $v3{-authprotocol} = lc $opt{authproto};
     $v3{-authpassword} = $opt{authpass} // '';
-  } else {
-    $v3{-security}     = 'authPriv';
-    $v3{-authprotocol} = lc $opt{authproto};
-    $v3{-authpassword} = $opt{authpass} // '';
+  } elsif ($opt{seclevel} ne 'noAuthNoPriv') {
+    print "UNKNOWN - Unsupported SNMP security level '$opt{seclevel}'\n"; exit 3;
+  }
+  if ($opt{seclevel} eq 'authPriv') {
     $v3{-privprotocol} = lc $opt{privproto};
     $v3{-privpassword} = $opt{privpass} // '';
   }
@@ -157,7 +241,7 @@ unless ($session) {
 
 # --- Read RF states ---
 my $rf = $session->get_request(
-  -varbindlist => [ $OID_cRFStatusUnitState, $OID_cRFStatusDuplexMode, $OID_cRFStatusPeerUnitState, $OID_cRFStatusLastSwactReason ]
+  -varbindlist => [ $OID_cRFStatusUnitState, $OID_cRFStatusDuplexMode, $OID_cRFStatusPeerUnitState, $OID_cRFStatusLastSwactReason ], %context
 );
 unless ($rf) {
   print "UNKNOWN - RF SNMP get failed: ".$session->error()."\n";
@@ -178,7 +262,7 @@ my $is_standbyhot = ($unit_state == 9)  ? 1 : 0;
 # --- If active, read HA peer health ---
 my $peer_up = undef;
 if ($is_active) {
-  my $ha = $session->get_request(-varbindlist => [ $OID_cLHaPeerHotStandbyEvent ]);
+  my $ha = $session->get_request(-varbindlist => [ $OID_cLHaPeerHotStandbyEvent ], %context);
   if ($ha) {
     $peer_up = $ha->{$OID_cLHaPeerHotStandbyEvent};
   } else {
@@ -190,20 +274,20 @@ if ($is_active) {
 my @ap_serial_msgs;
 if ($opt{ap_serial}) {
   # Try CISCO-LWAPP-AP-MIB first; fall back to AIRESPACE-WIRELESS-MIB
-  my $ap_serial_tbl = $session->get_table(-baseoid => $OID_cLApSerialNumber);
+  my $ap_serial_tbl = $session->get_table(-baseoid => $OID_cLApSerialNumber, %context);
   my ($serial_base, $name_base);
   if ($ap_serial_tbl && scalar keys %$ap_serial_tbl) {
     $serial_base = $OID_cLApSerialNumber;
     $name_base   = $OID_cLApName;
   } else {
-    $ap_serial_tbl = $session->get_table(-baseoid => $OID_bsnAPSerialNumber);
+    $ap_serial_tbl = $session->get_table(-baseoid => $OID_bsnAPSerialNumber, %context);
     if ($ap_serial_tbl && scalar keys %$ap_serial_tbl) {
       $serial_base = $OID_bsnAPSerialNumber;
       $name_base   = $OID_bsnAPName;
     }
   }
   if ($ap_serial_tbl && scalar keys %$ap_serial_tbl) {
-    my $ap_name_tbl = $session->get_table(-baseoid => $name_base);
+    my $ap_name_tbl = $session->get_table(-baseoid => $name_base, %context);
     for my $oid (sort keys %$ap_serial_tbl) {
       (my $suffix = $oid) =~ s/^\Q$serial_base\E\.//;
       my $serial = $ap_serial_tbl->{$oid};

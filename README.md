@@ -198,23 +198,28 @@ Perl plugin that monitors Cisco 9800 Wireless LAN Controller HA (SSO) health via
 |---|---|
 | **Language** | Perl 5.12+ |
 | **MIBs** | CISCO-RF-MIB (redundancy framework), CISCO-LWAPP-HA-MIB (HA peer health), CISCO-LWAPP-AP-MIB / AIRESPACE-WIRELESS-MIB (AP inventory) |
-| **SNMP** | v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
+| **SNMP** | v1, v2c, v3 (noAuthNoPriv, authNoPriv, authPriv) |
 | **Platform** | Cisco 9800 WLC (SSO HA pair) |
 | **Output** | Nagios format with perfdata (`peer_up`, `duplex`, `unit_state`, `peer_state`, `last_swact_reason`) |
 
 | Parameter | Default | Description |
 |---|---|---|
-| `--host` | required | Target WLC IP or hostname |
-| `--version` | 3 | SNMP version (2c or 3) |
-| `--secname` | — | SNMPv3 username |
-| `--seclevel` | authPriv | SNMPv3 security level |
-| `--authproto` | SHA | Auth protocol (SHA or MD5) |
-| `--privproto` | AES | Privacy protocol (AES or DES) |
+| `-H/--hostname` | required | Target WLC IP or hostname; `--host` remains supported |
+| `-p/--protocol` | 2c | SNMP version (`1`, `2c`, `3`); supplying a username selects v3 |
+| `-C/--community` | public | SNMPv1/v2c community or SNMPv3 shorthand |
+| `--username` | — | SNMPv3 username; `--secname` remains supported |
+| `--seclevel` | inferred | SNMPv3 security level inferred from supplied passwords unless explicitly set |
+| `--authprotocol` / `--authpassword` | SHA / unset | SNMPv3 authentication; legacy `--authproto` / `--authpass` supported |
+| `--privprotocol` / `--privpassword` | AES / unset | Privacy: AES, AES128, DES, 3DES or 3DESDE; legacy `--privproto` / `--privpass` supported |
+| `--contextengineid` / `--contextname` | unset | Optional SNMPv3 context engine ID (hexadecimal) and context name |
 | `--strict` | off | Escalate unexpected states to CRITICAL |
 | `--hard-strict` | off | Escalate any anomaly to CRITICAL (superset of `--strict`) |
 | `--ap-serial` | off | Walk AP table and include each AP name + serial number in output |
-| `--timeout` | 5 | SNMP timeout in seconds |
-| `--port` | 161 | SNMP port |
+| `-t/--timeout` | 15 | Timeout in seconds per SNMP request |
+| `-P/--port` | 161 | SNMP port |
+| `-?/--usage`, `-h/--help`, `-V/--version`, `-v/--verbose` | | Usage, help, plugin version, or debug details (up to three `-v` flags) |
+
+Legacy `--version 3` and `--version 2c` select the SNMP protocol; bare `--version` displays the plugin version. Passwords may also be supplied through `SNMP_AUTHPW` and `SNMP_PRIVPW`. CLI arguments and shorthand expose credentials in process listings; prefer environment variables when possible. The shorthand is `snmpv3,sha,authpass,aes,privpass,username[,contextengineid][,contextname]`; use `,,contextname` to omit the engine ID. Any single-character separator is accepted.
 
 **Usage:**
 ```bash
@@ -445,16 +450,19 @@ For the decision flow, rate formulas, numeric OIDs and limitations, see [How the
 
 | Parameter | Default | Description |
 |---|---|---|
-| `--hostname HOST` | Required | Target WLC hostname or IP; SNMP uses UDP port 161 |
+| `-H/--hostname HOST` | Required | Target WLC hostname or IP |
 | `--mode MODE` | Required | One of the six modes above |
-| `--community VALUE` | Unset | SNMPv2c community; provide this or `--user` |
-| `--user USER` | Unset | SNMPv3 username; the helper tries v3 first and may fall back to v2c if a community is also supplied |
-| `--seclevel LEVEL` | `authPriv` | `noAuthNoPriv`, `authNoPriv` or `authPriv` |
-| `--auth PROTOCOL` | `sha` | Use `sha` or `md5` |
-| `--authpw VALUE` | Unset | Authentication password; `SNMP_AUTHPW` is the environment fallback |
-| `--priv PROTOCOL` | `aes` | Use `aes` or `des` |
-| `--privpw VALUE` | Unset | Privacy password; `SNMP_PRIVPW` is the environment fallback |
-| `--timeout SECONDS` | `5` | Positive integer timeout per SNMP request, not for the whole check |
+| `-p/--protocol` | `2c` | SNMP version `1`, `2c` or `3`; a username selects v3 when omitted |
+| `-P/--port` | `161` | SNMP UDP port |
+| `-C/--community VALUE` | Unset | SNMPv1/v2c community or SNMPv3 shorthand |
+| `--username` / `--user USER` | Unset | SNMPv3 username; legacy mixed credentials fall back to v2c only when `--protocol` is omitted |
+| `--seclevel LEVEL` | Inferred | `noAuthNoPriv`, `authNoPriv` or `authPriv`, inferred from supplied passwords unless explicitly set |
+| `--authprotocol` / `--auth` | `sha` | Use `sha` or `md5` |
+| `--authpassword` / `--authpw` | Unset | Authentication password; `SNMP_AUTHPW` is the environment fallback |
+| `--privprotocol` / `--priv` | `aes` | Use `aes`, `aes128`, `des`, `3des` or `3desde` |
+| `--privpassword` / `--privpw` | Unset | Privacy password; `SNMP_PRIVPW` is the environment fallback |
+| `--contextengineid` / `--contextname` | Unset | Optional v3 context engine ID in hex and context name |
+| `-t/--timeout SECONDS` | `15` | Positive integer timeout per SNMP request, not for the whole check |
 | `--interval SECONDS` | `5` | Usage only: finite sample delay of at least 1 second |
 | `-w/--warning PERCENT` | `80` | Usage only: warning starts at this utilization |
 | `-c/--critical PERCENT` | `90` | Usage only: critical starts at this utilization; requires `0 <= warning < critical <= 100` |
@@ -462,7 +470,7 @@ For the decision flow, rate formulas, numeric OIDs and limitations, see [How the
 | `--multiline` | Off | Accepted by the shared parser; these modes always print their table on separate lines |
 | `-h/--help` | N/A | Shows options and detailed mode descriptions without querying SNMP |
 
-There are no `-H`/`-C` aliases. `--interval`, `-w` and `-c` affect only usage mode; `--include-interfaces` is rejected in other modes. Prefer environment variables over password options to avoid exposing SNMPv3 passwords in process listings. Explicit password options take precedence.
+`--interval`, `-w` and `-c` affect only usage mode; `--include-interfaces` is rejected in other modes. The WLC and WLC NTP checks also accept `-?/--usage`, `-V/--version`, and up to three `-v/--verbose` flags. SNMPv3 shorthand is `snmpv3,sha,authpass,aes,privpass,username[,contextengineid][,contextname]`; use `,,contextname` when omitting the engine ID. Any single-character separator is accepted. CLI passwords and shorthand are visible in process listings; prefer `SNMP_AUTHPW` and `SNMP_PRIVPW`. Explicit password options take precedence.
 
 ```bash
 ./scripts/check_cisco_wlc.py --hostname <WLC-IP> --community <community> --mode list-interfaces
@@ -534,7 +542,7 @@ OK - Smart Licensing enabled; no local entitlements exposed on standbyHot; licen
 
 The Smart Licensing fields were walked live; the new modes were replay/synthetic-tested, not yet executed live. A skip does not establish that the active peer is compliant: query that unit separately.
 
-`--timeout` defaults to 5 seconds per SNMP request. SNMPv3 passwords can also be supplied through `SNMP_AUTHPW` and `SNMP_PRIVPW`. Requires Python 3.8 and `pysnmp`, like the other Python checks.
+`--timeout` defaults to 15 seconds per SNMP request. SNMPv3 passwords can also be supplied through `SNMP_AUTHPW` and `SNMP_PRIVPW`. Requires Python 3.8 and `pysnmp`, like the other Python checks.
 
 | Output/perfdata | Meaning |
 |---|---|
@@ -578,7 +586,7 @@ Python plugin that checks the NTP synchronization state of a Cisco C9800 WLC via
 | `--hostname` | required | WLC hostname or IP address |
 | `--community` | — | SNMPv2c community string |
 | `--user` | — | SNMPv3 username |
-| `--timeout` | 5 | SNMP timeout in seconds |
+| `--timeout` | 15 | SNMP timeout per request in seconds |
 | `-w/--warning` | 100 | Warning threshold for absolute offset in milliseconds |
 | `-c/--critical` | 500 | Critical threshold for absolute offset in milliseconds |
 | `--min-peers` | 2 | WARNING if fewer peers than this are usable (stratum below 16) |
