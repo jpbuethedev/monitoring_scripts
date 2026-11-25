@@ -44,9 +44,9 @@
 #     missing counters or unknown speed return UNKNOWN unless another interface
 #     already requires CRITICAL. Includes per-interface rate/utilization perfdata.
 #
-# SNMPv3 defaults: --seclevel authPriv --auth sha --priv aes.
+# SNMPv3 security level is inferred from passwords; protocols default to sha and aes.
 # Passwords may instead use SNMP_AUTHPW and SNMP_PRIVPW environment variables.
-# Timeout defaults to 5 seconds per SNMP request.
+# Timeout defaults to 15 seconds per SNMP request.
 # list-interfaces lists index, name, description, alias, admin/oper state and Mbps.
 # Includes disabled and virtual interfaces; down links do not cause alerts.
 # Successful inventory exits 0 (OK); empty inventory exits 3 (UNKNOWN).
@@ -55,11 +55,10 @@
 
 import argparse
 import math
-import os
 import sys
 import time
 
-from ves_snmp_utils import OIDS, add_snmp_args, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
+from ves_snmp_utils import OIDS, add_snmp_args, prepare_wlc_snmp_args, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
 
 
 ADMIN_STATES = {1: "up", 2: "down", 3: "testing"}
@@ -473,7 +472,7 @@ SNMPv3 passwords may use SNMP_AUTHPW and SNMP_PRIVPW environment variables.
 --timeout applies per SNMP request; allow additional time for traffic sampling.
 """,
         )
-    add_snmp_args(parser, timeout_default=5)
+    add_snmp_args(parser, timeout_default=15, standard_aliases=True)
     parser.add_argument("--mode", required=True, choices=["list-interfaces", "interface-health", "interface-usage", "list-serial-numbers", "list-licenses", "license-health"],
                         help="Inventory interfaces, serials or licenses; check links, traffic usage or license health")
     parser.add_argument("--interval", type=float, default=5, help="Traffic sampling interval in seconds (default 5)")
@@ -485,13 +484,10 @@ SNMPv3 passwords may use SNMP_AUTHPW and SNMP_PRIVPW environment variables.
         parser.print_help()
         return 3
     args = parser.parse_args()
-    args.authpw = args.authpw or os.environ.get("SNMP_AUTHPW")
-    args.privpw = args.privpw or os.environ.get("SNMP_PRIVPW")
-    if not args.community and not args.user:
-        print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
-        return 3
-    if args.timeout <= 0:
-        print("UNKNOWN - --timeout must be positive")
+    try:
+        prepare_wlc_snmp_args(args)
+    except ValueError as error:
+        print("UNKNOWN - {}".format(error))
         return 3
     if args.include_interfaces is not None:
         if args.mode != "interface-usage":

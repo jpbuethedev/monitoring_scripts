@@ -94,6 +94,6 @@ Everything before `|` is the readable summary. Everything after it is performanc
 
 ## Connection settings
 
-The target address is required. SNMPv3 is the default and uses `authPriv` with SHA authentication and AES privacy by default; the monitoring setup supplies the username and passwords. For SNMPv2c, the default community is `public`, which should be changed to the value configured for the device. The default timeout is 5 seconds and the default SNMP port is 161.
+The target address is required. SNMPv2c is the default unless an SNMPv3 username is supplied or a protocol is selected explicitly. SNMPv3 infers the security level from the supplied passwords; authentication and privacy protocols default to SHA and AES. For SNMPv1/v2c, the default community is `public`, which should be changed to the value configured for the device. The default timeout is 15 seconds per request and the default SNMP port is 161.
 
 For the full option list and command examples, see the [monitoring scripts README](../README.md#check_cisco_wlc_hapl).
