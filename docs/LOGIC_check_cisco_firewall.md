@@ -4,7 +4,7 @@
 
 This plugin reads status from a Cisco ASA, FTD, or Secure Firewall appliance over SNMP. It is read-only: it does not change failover roles, interface state, or device configuration. Each run selects one mode, so it reports a focused result rather than a single overall test of every firewall function.
 
-The check requires a target hostname or IP and either an SNMPv2c community or SNMPv3 username. SNMPv3 uses `authPriv`, SHA authentication, and AES privacy by default; passwords may be supplied using `SNMP_AUTHPW` and `SNMP_PRIVPW` environment variables rather than command-line options.
+The check requires a target hostname or IP and either an SNMP community (v1/v2c) or an SNMPv3 username. SNMP options are the standard set shared with the WLC checks (`-p/--protocol`, `-P/--port`, SNMPv3 context, the `snmpv3,...` community shorthand and long option aliases; see the README). SNMPv3 infers its security level from the supplied passwords (`authPriv` when both are given), uses SHA authentication and AES privacy by default; passwords may be supplied using `SNMP_AUTHPW` and `SNMP_PRIVPW` environment variables rather than command-line options. Invalid or conflicting SNMP options return UNKNOWN.
 
 ## What happens during a check
 

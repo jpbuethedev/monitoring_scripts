@@ -8,7 +8,7 @@ The check is read-only. It does not change the FMC configuration or test whether
 
 ## What happens during a check
 
-1. **Validate the request.** The target and mode are required. The check also requires SNMPv2c community credentials or an SNMPv3 username. SNMPv3 passwords can be passed as options or through `SNMP_AUTHPW` and `SNMP_PRIVPW` environment variables.
+1. **Validate the request.** The target and mode are required. The check also requires SNMPv1/v2c community credentials or an SNMPv3 username, using the standard SNMP options shared with the WLC checks (`-p/--protocol`, `-P/--port`, SNMPv3 context, `snmpv3,...` community shorthand; see the README). The SNMPv3 security level is inferred from the supplied passwords, and passwords can be passed as options or through `SNMP_AUTHPW` and `SNMP_PRIVPW` environment variables. Invalid or conflicting SNMP options return UNKNOWN.
 2. **Resolve thresholds.** Each metric mode has its own defaults. Explicit `-w/--warning` and `-c/--critical` values override them. Warning must be lower than critical; resource values must be between 0 and 100, while `timesync` thresholds are non-negative seconds. `sysinfo` does not use thresholds.
 3. **Read only the data needed for the selected mode.** A missing table row, SNMP failure, malformed required value, or invalid request cannot be treated as healthy and is reported as UNKNOWN.
 4. **Print the monitoring result.** The plugin emits a status and human-readable summary. Metric modes also emit Nagios performance data after `|`.

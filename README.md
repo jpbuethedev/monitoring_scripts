@@ -15,9 +15,10 @@ Cisco Identity Services Engine infrastructure monitoring via SNMPv2c/v3. Require
 ```text
 ./scripts/check_cisco_ise.py -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]
 ./scripts/check_cisco_ise.py --hostname HOST [--community COMMUNITY] [--port PORT] [--timeout SECONDS] --mode MODE [OPTIONS]
+./scripts/check_cisco_ise.py -H HOST --user USER [--seclevel LEVEL] [--authpw PW] [--privpw PW] --mode MODE [OPTIONS]
 ```
 
-`-P/--port` selects the SNMP UDP port (default 161, valid range 1-65535) for both GET and WALK requests, including SNMPv3 and fallback. Existing checks without a port option retain port 161. `-h/--help` includes this usage, mode descriptions, defaults and examples.
+`-P/--port` selects the SNMP UDP port (default 161, valid range 1-65535) for both GET and WALK requests, including SNMPv3 and fallback. Existing checks without a port option retain port 161. `-h/--help` includes this usage, mode descriptions, defaults and examples. SNMP options (`-p/--protocol`, `-P/--port`, SNMPv3 options, context, `snmpv3,...` shorthand, `-V`, `-?/--usage`) are shared with the WLC checks; see [Standard SNMP options](#standard-snmp-options-fmc-firewall-and-ise).
 
 Help and argument validation run before loading SNMP dependencies. Invoking the plugin with no arguments prints full help and exits UNKNOWN (3); `--help` exits 0. Real checks still require working SNMP/crypto dependencies. Interrupted dependency loading returns UNKNOWN without a traceback; a slow or stalled native-library import is an interpreter/environment issue, not an SNMP timeout.
 
@@ -69,7 +70,7 @@ Interface defaults omit `lo`, `podman*`, and `veth*`; `--include-interfaces` sel
 
 `serial-numbers` requires at least one non-empty `entPhysicalSerialNum` row; otherwise it returns UNKNOWN. It joins serials to entity name, class, model, and description by ENTITY-MIB index. Those metadata columns are best-effort; missing metadata is displayed as unavailable and does not hide a serial. This is inventory only and does not report license status or the ISE application release.
 
-`-C/--community` overrides `SNMP_COMMUNITY`. SNMPv3 uses `--user`, `--seclevel`, `--auth`, `--authpw`, `--priv`, `--privpw`; passwords may instead use `SNMP_AUTHPW` and `SNMP_PRIVPW`. Explicit CLI credentials take precedence. Environment variables avoid command-line/history exposure but must still be protected. `-t/--timeout` defaults to 5 seconds per SNMP request, not a whole-check deadline. `-v/--verbose` adds processor/mount detail after the status/perfdata line. Missing or invalid required metrics and timeouts return UNKNOWN; other SNMP failures retain shared-helper severity. This does not monitor RADIUS/TACACS+ authentication, personas, replication, or application readiness.
+`-C/--community` overrides `SNMP_COMMUNITY`. SNMPv3 uses `--user`, `--seclevel`, `--auth`, `--authpw`, `--priv`, `--privpw`; passwords may instead use `SNMP_AUTHPW` and `SNMP_PRIVPW`. Explicit CLI credentials take precedence. Environment variables avoid command-line/history exposure but must still be protected. `-t/--timeout` defaults to 5 seconds per SNMP request, not a whole-check deadline. `-v/--verbose` adds processor/mount detail after the status/perfdata line (repeat up to 3 times for SNMP debug details on stderr). Missing or invalid required metrics and timeouts return UNKNOWN; other SNMP failures retain shared-helper severity. This does not monitor RADIUS/TACACS+ authentication, personas, replication, or application readiness.
 
 The seven modes preceding `memory_usage` were live-tested against instance 1 (`172.23.38.11`) on Python 3.8/PySNMP 4.4.12. UCD-SNMP counters for `memory_usage` were discovered there, but the new plugin mode has not been run live. The deployed `serial-numbers` mode returned one component (`Cisco Application Deployment Engine`, model `ISE-VM-K9`) and OK. Instance 2 (`172.23.38.12`) timed out during discovery. Run focused tests from the repository root with `python -B -m unittest discover -s tests -p test_check_cisco_ise.py`.
 
@@ -326,8 +327,10 @@ Python plugin that checks a Cisco firewall (ASA/FTD/Secure Firewall 3100) via SN
 | Parameter | Default | Description |
 |---|---|---|
 | `-H/--hostname` | required | Target hostname or IP address |
-| `-C/--community` | — | SNMPv2c community string |
-| `--user` | — | SNMPv3 username |
+| `-C/--community` | — | SNMPv1/v2c community, or `snmpv3,...` shorthand (see [Standard SNMP options](#standard-snmp-options-fmc-firewall-and-ise)) |
+| `--user` / `--username` | — | SNMPv3 username; `--seclevel`, `--auth`, `--authpw`, `--priv`, `--privpw` (long aliases `--authprotocol`, `--authpassword`, `--privprotocol`, `--privpassword`) |
+| `-p/--protocol`, `-P/--port` | `2c` (`3` with a username), `161` | SNMP version `1`, `2c` or `3`, and UDP port |
+| `--contextengineid`, `--contextname` | — | Optional SNMPv3 context |
 | `--peer-hostname` | auto-detected | Peer unit IP/hostname, used by `ha_pair` |
 | `-t/--timeout` | 30 | SNMP timeout in seconds |
 | `-w/--warning` / `-c/--critical` | mode-dependent | Thresholds (percent, seconds or counts depending on mode) |
@@ -361,10 +364,12 @@ Python plugin that checks a Cisco Secure Firewall Management Center (FMC) via SN
 | Parameter | Default | Description |
 |---|---|---|
 | `-H/--hostname` | required | FMC hostname or IP address |
-| `-C/--community` | — | SNMPv2c community string |
-| `--user` | — | SNMPv3 username |
+| `-C/--community` | — | SNMPv1/v2c community, or `snmpv3,...` shorthand (see [Standard SNMP options](#standard-snmp-options-fmc-firewall-and-ise)) |
+| `--user` / `--username` | — | SNMPv3 username; `--seclevel`, `--auth`, `--authpw`, `--priv`, `--privpw` (long aliases `--authprotocol`, `--authpassword`, `--privprotocol`, `--privpassword`) |
+| `-p/--protocol`, `-P/--port` | `2c` (`3` with a username), `161` | SNMP version `1`, `2c` or `3`, and UDP port |
+| `--contextengineid`, `--contextname` | — | Optional SNMPv3 context |
 | `-t/--timeout` | 30 | SNMP timeout in seconds |
-| `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to each mount's output line |
+| `-v/--verbose` | off | For `disk` mode, adds per-mount used/total MB to each mount's output line; repeat up to 3 times for SNMP debug details on stderr |
 | `--mode` | required | `cpu`, `memory`, `swap`, `disk`, `timesync`, or `sysinfo` |
 | `-w/--warning` | mode-dependent | Warning threshold in percent for resource modes, seconds for timesync; not used by sysinfo |
 | `-c/--critical` | mode-dependent | Critical threshold in percent for resource modes, seconds for timesync; not used by sysinfo |
@@ -619,6 +624,29 @@ OK - NTP synchronized to remote server 10.56.140.125 (stratum 2), offset -0.4433
 **Requirements:** `pysnmp`
 
 ---
+
+### Standard SNMP options (FMC, firewall and ISE)
+
+`check_cisco_fmc.py`, `check_cisco_firewall.py` and `check_cisco_ise.py` use the same SNMP option set as the WLC checks. The options are defined once in [ves_snmp_args.py](scripts/ves_snmp_args.py), which does not import pysnmp, so help and argument validation still work without the SNMP libraries; [ves_snmp_utils.py](scripts/ves_snmp_utils.py) re-exports them. Deploy both modules together.
+
+| Option | Default | Description |
+|---|---|---|
+| `-H/--hostname` | Required | Target hostname or IP |
+| `-p/--protocol` | `2c` | SNMP version `1`, `2c` or `3`; a username selects v3 when omitted |
+| `-P/--port` | `161` | SNMP UDP port (1-65535) |
+| `-C/--community` | Unset | SNMPv1/v2c community or SNMPv3 shorthand (ISE also reads `SNMP_COMMUNITY`) |
+| `--user` / `--username` | Unset | SNMPv3 username |
+| `--seclevel` | Inferred | `noAuthNoPriv`, `authNoPriv` or `authPriv`, inferred from the supplied passwords unless set |
+| `--auth` / `--authprotocol` | `sha` | `sha` or `md5` |
+| `--authpw` / `--authpassword` | Unset | Authentication password; `SNMP_AUTHPW` is the environment fallback |
+| `--priv` / `--privprotocol` | `aes` | `aes`, `aes128`, `des`, `3des` or `3desde` |
+| `--privpw` / `--privpassword` | Unset | Privacy password; `SNMP_PRIVPW` is the environment fallback |
+| `--contextengineid`, `--contextname` | Unset | Optional SNMPv3 context engine ID (hex) and context name |
+| `-t/--timeout` | 30 (FMC, firewall), 5 (ISE) | Seconds per SNMP request, not a whole-check deadline |
+| `-v/--verbose` | Off | Keeps its plugin-specific extra output; repeating it (up to 3 times) also prints SNMP debug details to stderr |
+| `-V/--version`, `-?/--usage` | N/A | Show the plugin version or short usage and exit 0 |
+
+The shorthand is `snmpv3,sha,authpass,aes,privpass,username[,contextengineid][,contextname]`; use `,,contextname` to omit the engine ID. Any single-character separator is accepted. CLI passwords and shorthand are visible in process listings, so prefer `SNMP_AUTHPW` and `SNMP_PRIVPW`. Explicit password options take precedence over the environment. Supplying both `--community` and `--user` without `--protocol` keeps the existing v3-then-v2c fallback. Behavior changes from the previous per-plugin options: `--seclevel` is now inferred instead of defaulting to `authPriv`, and `--priv` accepts `aes128` and `3des` in addition to `aes`/`des` (ISE previously accepted only `aes` and `des`). Invalid or conflicting SNMP options return UNKNOWN (3).
 
 ## Exit Codes (all monitoring scripts)
 

@@ -4,7 +4,12 @@
 # Nagios plugin to check a Cisco Secure Firewall Management Center (FMC) via SNMP.
 #
 # Usage: check_cisco_fmc.py -H HOST -C COMMUNITY --mode MODE [OPTIONS]
-#        check_cisco_fmc.py -H HOST --user USER --mode MODE [OPTIONS]
+#        check_cisco_fmc.py -H HOST --user USER [--seclevel noAuthNoPriv|authNoPriv|authPriv]
+#                           [--auth sha|md5] [--authpw PW] [--priv aes|aes128|des|3des] [--privpw PW]
+#                           --mode MODE [OPTIONS]
+# SNMP options are shared with the WLC checks: -p/--protocol 1|2c|3, -P/--port, SNMPv3 context
+# (--contextengineid/--contextname) and the snmpv3,... shorthand for -C. Passwords may also come
+# from the SNMP_AUTHPW and SNMP_PRIVPW environment variables.
 # Modes: cpu, memory, swap, disk, timesync, sysinfo
 # Use -w/-c for thresholds (percent, or seconds for timesync); see --help for options.
 #
@@ -31,9 +36,8 @@
 
 import argparse
 from datetime import datetime, timedelta, timezone
-import os
 import sys
-from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
+from ves_snmp_utils import OIDS, NAGIOS_STATUS, add_snmp_args, prepare_snmp_args, pysnmp_get, pysnmp_walk_indexed, snmp_value_to_str
 
 # HOST-RESOURCES-TYPES hrStorageType values used to pick out RAM / swap / fixed-disk table rows
 HR_STORAGE_TYPE_RAM = "1.3.6.1.2.1.25.2.1.2"
@@ -314,7 +318,10 @@ def check_sysinfo(args):
 def main():
     usage = (
         "%(prog)s -H HOST -C COMMUNITY --mode MODE [OPTIONS]\n"
-        "       %(prog)s -H HOST --user USER --mode MODE [OPTIONS]\n"
+        "       %(prog)s -H HOST --user USER [--seclevel LEVEL] [--auth sha|md5] [--authpw PW]\n"
+        "                [--priv aes|des|3des] [--privpw PW] --mode MODE [OPTIONS]\n"
+        "       %(prog)s -H HOST -C snmpv3,sha,AUTHPW,aes,PRIVPW,USER --mode MODE [OPTIONS]\n"
+        "       [-p 1|2c|3] [-P PORT] [-t SECONDS] [--contextengineid HEX] [--contextname NAME]\n"
         "\n"
         "Modes: cpu, memory, swap, disk, timesync, sysinfo\n"
         "Thresholds: -w WARN -c CRIT (percent; seconds for timesync)\n"
@@ -325,17 +332,8 @@ def main():
         description="Nagios plugin to check a Cisco Secure Firewall Management Center (FMC) via SNMP",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("-H", "--hostname", required=True, help="FMC hostname or IP")
-    parser.add_argument("-C", "--community", help="SNMPv2c community string")
-    parser.add_argument("--user", help="SNMPv3 username")
-    parser.add_argument("--seclevel", default="authPriv",
-                        choices=["noAuthNoPriv", "authNoPriv", "authPriv"])
-    parser.add_argument("--auth", default="sha")
-    parser.add_argument("--authpw", help="SNMPv3 auth password (or set SNMP_AUTHPW env var instead, to avoid exposing it in the process list)")
-    parser.add_argument("--priv", default="aes")
-    parser.add_argument("--privpw", help="SNMPv3 priv password (or set SNMP_PRIVPW env var instead, to avoid exposing it in the process list)")
-    parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
+    add_snmp_args(parser, timeout_default=30, standard_aliases=True, multiline=False,
+                  verbose_help="Print additional detail in the output; repeat (up to 3 times) for SNMP debug details on stderr")
     parser.add_argument("--mode", required=True, metavar="MODE",
                         choices=["cpu", "memory", "swap", "disk", "timesync", "sysinfo"],
                         help="A keyword which tells the plugin what to do\n"
@@ -362,12 +360,10 @@ def main():
 
     args = parser.parse_args()
 
-    # prefer explicit CLI flags but fall back to env vars so secrets don't have to appear in the process list
-    args.authpw = args.authpw or os.environ.get("SNMP_AUTHPW")
-    args.privpw = args.privpw or os.environ.get("SNMP_PRIVPW")
-
-    if not args.community and not args.user:
-        print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
+    try:
+        prepare_snmp_args(args)
+    except ValueError as exc:
+        print(f"UNKNOWN - {exc}")
         sys.exit(3)
 
     try:

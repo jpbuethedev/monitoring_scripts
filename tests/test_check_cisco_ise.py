@@ -428,7 +428,7 @@ class ISECheckTests(unittest.TestCase):
                             ("interfaces", ["-w", "80"]),
                             ("memory_usage", ["-w", "80"]),
                             ("serial-numbers", ["-w", "5"]),
-                            ("cpu", ["--unknown-option"]), ("cpu", ["--user", "test"] )):
+                            ("cpu", ["--unknown-option"]), ("cpu", ["--user", "test", "--seclevel", "authPriv"])):
             with self.subTest(mode=mode, flags=flags):
                 self.assertEqual(self.run_check(mode, flags)[0], 3)
 
@@ -495,6 +495,7 @@ class ISECheckTests(unittest.TestCase):
             "    return original_import(name, *args, **kwargs)\n"
             "builtins.__import__ = guarded_import\n"
             "sys.argv = sys.argv[1:]\n"
+            "sys.path.insert(0, __import__('os').path.dirname(sys.argv[0]))\n"
             "runpy.run_path(sys.argv[0], run_name='__main__')\n"
         )
         cases = ((["--help"], 0, "Modes:"), ([], 3, "Modes:"),
@@ -531,6 +532,20 @@ class ISECheckTests(unittest.TestCase):
             self.assertEqual(args.user, "test-user")
             with self.assertRaises(ise.CheckError):
                 ise.parse_args(["-H", "node", "--mode", "cpu"])
+
+    def test_standard_snmp_options(self):
+        with patch.dict(os.environ, {}, clear=True):
+            args = ise.parse_args(["-H", "node", "--mode", "cpu", "-p", "3", "-P", "1161", "-v", "-v",
+                                   "-C", "snmpv3;sha;authpass;aes128;privpass;testuser;0x8000000001;mycontext"])
+            self.assertEqual((args.protocol, args.user, args.priv, args.port, args.seclevel, args.contextname),
+                             ("3", "testuser", "aes128", 1161, "authPriv", "mycontext"))
+            self.assertEqual(ise.parse_args(["-H", "node", "--mode", "cpu", "--username", "u", "--authpassword", "a"]).seclevel,
+                             "authNoPriv")
+            self.assertTrue(ise.parse_args(["-H", "node", "--mode", "cpu", "-C", "public", "-p", "1"]).community)
+            for options in (["-p", "3", "--user", "u", "--seclevel", "authPriv", "--authpw", "a"],
+                            ["-C", "public", "-p", "3"], ["-C", "public", "--contextname", "ctx"]):
+                with self.subTest(options=options), self.assertRaises(ise.CheckError):
+                    ise.parse_args(["-H", "node", "--mode", "cpu"] + options)
 
     def test_timeout_and_optional_name_timeout(self):
         output = io.StringIO()

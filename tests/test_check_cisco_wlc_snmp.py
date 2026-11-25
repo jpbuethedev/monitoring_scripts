@@ -95,14 +95,14 @@ class WlcSnmpTests(unittest.TestCase):
                 self.parse(*options)
 
     def test_python_help_and_invalid_cli(self):
-        for name in ("check_cisco_wlc.py", "check_cisco_wlc_ntp.py"):
+        for name in ("check_cisco_wlc.py", "check_cisco_wlc_ntp.py", "check_cisco_fmc.py", "check_cisco_firewall.py", "check_cisco_ise.py"):
             script = str(ROOT / "scripts" / name)
             for flag in ("--help", "--usage", "-?", "--version", "-V"):
                 result = subprocess.run([sys.executable, "-B", script, flag], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, (name, flag, result.stderr))
             options = ["-H", "localhost", "-p", "3", "--username", "testuser", "--seclevel", "authPriv"]
-            if name == "check_cisco_wlc.py":
-                options += ["--mode", "list-interfaces"]
+            if name != "check_cisco_wlc_ntp.py":
+                options += ["--mode", "list-interfaces" if name == "check_cisco_wlc.py" else "cpu"]
             result = subprocess.run([sys.executable, "-B", script, *options], capture_output=True, text=True)
             self.assertEqual(result.returncode, 3)
             self.assertIn("authentication password is required", result.stdout)

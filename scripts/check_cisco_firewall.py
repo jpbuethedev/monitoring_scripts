@@ -6,10 +6,15 @@
 # Usage: check_cisco_firewall.py -H/--hostname <network-component>
 #            ( -C/--community <snmp-community> | --user <snmpv3-user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]
 #              [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )
+#            [ -p/--protocol 1|2c|3 ] [ -P/--port <port> ] [ --contextengineid <hex> ] [ --contextname <name> ]
 #            [ -t/--timeout <seconds> ] [ -v/--verbose ] [ --html-table ]
 #            --mode ha_summary|ha_pair|cpu|memory|connections|uptime|primary_state|secondary_state|sysinfo|hardware|interfaces
 #            [ --peer-hostname <network-component> ]
 #            [ -w/--warning <threshold> ] [ -c/--critical <threshold> ]
+#
+# SNMP options are shared with the WLC checks (see ves_snmp_args.py): -C also accepts the
+# snmpv3,<auth>,<authpw>,<priv>,<privpw>,<user>[,<engineid>][,<context>] shorthand, and passwords
+# may come from the SNMP_AUTHPW and SNMP_PRIVPW environment variables.
 #
 # Modes:
 #   ha_summary          - HA state of the primary/secondary hardware units (cfwHardwareStatusValue)
@@ -47,10 +52,9 @@
 import argparse
 import copy
 import html
-import os
 import re
 import sys
-from ves_snmp_utils import OIDS, NAGIOS_STATUS, pysnmp_get, pysnmp_walk_indexed, pysnmp_walk_multi_indexed, snmp_value_to_str
+from ves_snmp_utils import OIDS, NAGIOS_STATUS, add_snmp_args, prepare_snmp_args, pysnmp_get, pysnmp_walk_indexed, pysnmp_walk_multi_indexed, snmp_value_to_str
 
 IPV4_PATTERN = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
 
@@ -815,7 +819,8 @@ def main():
         "%(prog)s -H/--hostname <host>\n"
         "           ( -C/--community <community> | --user <user> [--seclevel noAuthNoPriv|authNoPriv|authPriv]\n"
         "             [--auth <auth-protocol>] [--authpw <auth-password>] [--priv <priv-protocol>] [--privpw <priv-password>] )\n"
-        "           [-t/--timeout <seconds>] [-v/--verbose] [--html-table]\n"
+        "           [-p 1|2c|3] [-P/--port <port>] [-t/--timeout <seconds>] [-v/--verbose] [--html-table]\n"
+        "           [--contextengineid <hex>] [--contextname <name>]\n"
         "           --mode MODE\n"
         "           [-w/--warning <threshold>] [-c/--critical <threshold>]"
     )
@@ -824,21 +829,12 @@ def main():
         description="Nagios plugin to check a Cisco firewall (ASA/FTD/Secure Firewall) via SNMP",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("-H", "--hostname", required=True, help="Firewall hostname or IP")
+    add_snmp_args(parser, timeout_default=30, standard_aliases=True, multiline=False,
+                  verbose_help="Print additional detail in the output; repeat (up to 3 times) for SNMP debug details on stderr")
     parser.add_argument("--peer-hostname",
                         help="Paired unit's hostname or IP for --mode ha_pair. If omitted, the peer is "
                              "guessed from --hostname via the +/-2 last-octet IPv4 convention and confirmed "
                              "by a live query; exits WARNING if no candidate can be confirmed.")
-    parser.add_argument("-C", "--community", help="SNMPv2c community string")
-    parser.add_argument("--user", help="SNMPv3 username")
-    parser.add_argument("--seclevel", default="authPriv",
-                        choices=["noAuthNoPriv", "authNoPriv", "authPriv"])
-    parser.add_argument("--auth", default="sha")
-    parser.add_argument("--authpw", help="SNMPv3 auth password (or set SNMP_AUTHPW env var instead, to avoid exposing it in the process list)")
-    parser.add_argument("--priv", default="aes")
-    parser.add_argument("--privpw", help="SNMPv3 priv password (or set SNMP_PRIVPW env var instead, to avoid exposing it in the process list)")
-    parser.add_argument("-t", "--timeout", type=int, default=30, help="SNMP timeout in seconds")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Print additional detail in the output")
     parser.add_argument("--html-table", action="store_true",
                         help="Render the hardware/interfaces detail table as an HTML <table> instead of "
                              "plain ljust+pipe-delimited text. Only useful for a frontend that renders raw "
@@ -877,12 +873,10 @@ def main():
 
     args = parser.parse_args()
 
-    # prefer explicit CLI flags but fall back to env vars so secrets don't have to appear in the process list
-    args.authpw = args.authpw or os.environ.get("SNMP_AUTHPW")
-    args.privpw = args.privpw or os.environ.get("SNMP_PRIVPW")
-
-    if not args.community and not args.user:
-        print("UNKNOWN - No SNMP credentials provided (use --community or --user)")
+    try:
+        prepare_snmp_args(args)
+    except ValueError as exc:
+        print(f"UNKNOWN - {exc}")
         sys.exit(3)
 
     if args.mode == "ha_summary":

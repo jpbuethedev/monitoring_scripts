@@ -8,6 +8,8 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
+from ves_snmp_args import add_snmp_args, prepare_snmp_args
+
 NAGIOS_STATUS = ("OK", "WARNING", "CRITICAL", "UNKNOWN")
 _SNMP_LOADED = False
 DEFAULT_MOUNTS = "/,/opt,/boot,/tmp,/storedconfig,/mnt/encpart"
@@ -552,7 +554,10 @@ def parse_args(argv):
         usage=("%(prog)s -H HOST [-C COMMUNITY] [-P PORT] [-t SECONDS] --mode MODE [OPTIONS]\n"
                "       %(prog)s --hostname HOST [--community COMMUNITY] [--port PORT] "
                "[--timeout SECONDS] --mode MODE [OPTIONS]\n"
-               "       %(prog)s -H HOST --user USER --mode MODE [SNMPv3 OPTIONS]\n"
+               "       %(prog)s -H HOST --user USER [--seclevel LEVEL] [--auth sha|md5] [--authpw PW]\n"
+               "                [--priv aes|des|3des] [--privpw PW] --mode MODE [OPTIONS]\n"
+               "       %(prog)s -H HOST -C snmpv3,sha,AUTHPW,aes,PRIVPW,USER --mode MODE [OPTIONS]\n"
+               "       [-p 1|2c|3] [--contextengineid HEX] [--contextname NAME]\n"
                "\nModes:\n"
                "  cpu      Last-minute average CPU load and busiest logical processor\n"
                "  disk     Usage of selected mount paths; the busiest mount drives status\n"
@@ -581,19 +586,8 @@ def parse_args(argv):
                 "SNMPv3 uses --user with SNMP_AUTHPW/SNMP_PRIVPW or password flags.\n"
                 "Memory is informational unless both -w and -c are supplied."),
     )
-    parser.add_argument("-H", "--hostname", required=True, help="ISE hostname or IP address")
-    parser.add_argument("-C", "--community", help="SNMPv2c community (or SNMP_COMMUNITY)")
-    parser.add_argument("-P", "--port", type=int, default=161, help="SNMP UDP port (default: 161)")
-    parser.add_argument("--user", help="SNMPv3 username")
-    parser.add_argument("--seclevel", default="authPriv",
-                        choices=("noAuthNoPriv", "authNoPriv", "authPriv"))
-    parser.add_argument("--auth", default="sha", choices=("sha", "md5"))
-    parser.add_argument("--authpw", help="SNMPv3 auth password (or SNMP_AUTHPW)")
-    parser.add_argument("--priv", default="aes", choices=("aes", "des"))
-    parser.add_argument("--privpw", help="SNMPv3 privacy password (or SNMP_PRIVPW)")
-    parser.add_argument("-t", "--timeout", type=int, default=5,
-                        help="Per-request timeout in seconds (default: 5)")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Show processor or mount details")
+    add_snmp_args(parser, timeout_default=5, standard_aliases=True, multiline=False,
+                  verbose_help="Show processor or mount details; repeat (up to 3 times) for SNMP debug details on stderr")
     parser.add_argument("--mode", required=True,
                         choices=("cpu", "disk", "swap", "memory", "memory_usage", "uptime", "sysinfo", "interfaces",
                                  "serial-numbers", "timesync"),
@@ -616,19 +610,10 @@ def parse_args(argv):
         parser.exit(3)
     args = parser.parse_args(arguments)
     args.community = args.community or os.environ.get("SNMP_COMMUNITY")
-    args.authpw = args.authpw or os.environ.get("SNMP_AUTHPW")
-    args.privpw = args.privpw or os.environ.get("SNMP_PRIVPW")
-    if not args.community and not args.user:
-        raise CheckError("Supply --community, SNMP_COMMUNITY or --user")
-    if args.timeout <= 0:
-        raise CheckError("Timeout must be positive")
-    if not 1 <= args.port <= 65535:
-        raise CheckError("Port must be between 1 and 65535")
-    if args.user:
-        if args.seclevel != "noAuthNoPriv" and not args.authpw:
-            raise CheckError("SNMPv3 authentication password required")
-        if args.seclevel == "authPriv" and not args.privpw:
-            raise CheckError("SNMPv3 privacy password required")
+    try:
+        prepare_snmp_args(args)
+    except ValueError as error:
+        raise CheckError(str(error))
     if args.mode != "disk" and (args.include_mounts is not None or args.exclude_mounts is not None):
         raise CheckError("Mount filters are only applicable to disk mode")
     if args.mode != "interfaces" and (args.include_interfaces is not None or args.exclude_interfaces is not None):
